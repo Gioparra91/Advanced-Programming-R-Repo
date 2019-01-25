@@ -1,0 +1,3876 @@
+---
+title: "ADVANCED_R_CODES"
+author: "Giovanni Parravicini"
+date: "6/14/2018"
+output: pdf_document
+---
+
+----------------------
+OVERVIEW OF THE COURSE
+----------------------
+
+*The Road Map*
+Section 1: Pre-model Building Steps
+Section 2: Regression Modelling
+Section 3: Classification Models and the caret Package
+Section 4: Core Machine Learning
+Section 5: Unsupervised Learning
+Section 6: Time Series Analysis and Forecasting
+Section 7: Text Analytics
+Section 8: ggplot2
+Section 9: Speeding Up R Code
+Section 10: Build Packages and Submit to Cran
+
+
+----------------------
+*SECTION 1: Pre-Model Building Steps*
+----------------------
+**TOPICS: Understand variables and relationships:**
+- Univariate analysis: describe data and notice significant pattern:
+    1. type of variables
+    2. measures of central tendency
+    3. measures of dispersion
+    4. challange
+- Bivariate analysis
+- Outlier detection
+- Missing value treatment
+
+--- Univariate analysis ---
+
+1. Types of variables.
+Continuos variable (~numeric) or categorical variables:
+
+for continuous variables:
+Central Tendency: mean, median ( 50th%ile)and Mode (most  fobs)
+Dispersion: SD ( $SD=(√1/N(∑^N_{i=1}(x_{i}−x)^2))$), Variance, Range (min-max), Quartiles, Interquantile Range (IQR) and Coefficient of Variation (SD/mean)
+
+```{r univariate analysis}
+#install.packages("car", repo="http://cran.rstudio.com")
+library(car)
+data("Prestige")
+
+# you can apply statistical tools manually removing NAs from the dataset
+mean(Prestige$income)
+mean(Prestige$income, na.rm=T)
+median(Prestige$income, na.rm=T)
+sd(Prestige$income, na.rm=T)
+var(Prestige$income, na.rm=T)
+quantile(Prestige$income, na.rm=T, probs=c(0.01, 0.05, 0.1, 0.25, 0.5, 0.75))
+
+# you can apply directly using "Hmisc" or "pastecs" package as alternatives
+install.packages("Hmisc")
+library(Hmisc)
+describe(Prestige)
+
+install.packages("pastecs")
+pastecs::stat.desc(Prestige)
+
+##### CHALLENGE: find coefficient of variation and 95th percentile value for "price" from "Cars93" dataset 
+library(MASS)
+data("Cars93")
+
+summary(Cars93$Price)
+var(Cars93$Price)
+quantile(Cars93$Price, probs=0.95)
+#######
+```
+
+--- Bivariate analysis ---
+Are the relationship (correlation) statistical significant? 3 possible combinations:
+  - Continuos vs Continuos: Quantify relationship with pearson correlatio coefficient (-1< $\rho$ <1):
+  - Continuos vs Categorical: anova test
+  - Categorical vs Categorical: chi square distribution test
+
+```{r bivariate analysis}
+library(car)
+data("Prestige")
+
+'CONTINUOS VERSUS CONTINUOS'
+# cor test for statistical significance of the relationship
+cor(Prestige$income,Prestige$education)
+cor.test(Prestige$income,Prestige$education) 
+
+'CONTINUOS VERSUS CATEGORICAL'
+# ANOVA: H0 all population means are equal and H1 at least one populatio nmean is diferent from the rest.
+# F-Rario=(mean between groups sum of squares/mean within groups sum of squares) the strong the relationship the highest the Fratio (higher the 1).
+boxplot(income~type,data=Prestige,
+        main="Income vs Occupation Type",
+        ylab="Income") # boxplot shows diff between groups mean
+
+anovamod <- aov(income~type, data=Prestige)
+summary(anovamod) # mean sq is variance. Fstatistic is ratio. Fratio should be greater than 1 alternative meaning low pvalue. if pvalue is less than significant value we reject the H0 and conclude that at least one population mean is different from the rest
+
+'CATEGORICAL VERSUS CATEGORICAL'
+# chi statistic. the higher the statistic the higher the relationship betqween variables.
+Prestige$income_cat <- dplyr::ntile(Prestige$income,4)
+table(Prestige$income_cat, x=Prestige$type)
+
+chisq.test(y=Prestige$income_cat, x=Prestige$type)
+# variables have a statistical significance
+
+'CHALLANGE: FIND A STATISTICAL SIGNIFICANT RELATIONSHIP WITH INCOME'
+anova.challenge <- aov(income~women, data=Prestige)
+summary(anova.challenge)
+```
+
+--- Outlier detection ---
+Outliers are extreme values in ur Data that bias predictions. They the values outside the whiskers IQR in a boxplot and change the slope of linear models. Dangerous in ML.
+```{r Outlier detection}
+library(car)
+data("Prestige")
+myVar <- Prestige$income
+
+'3 times IQR'
+iqr <- IQR(myVar)
+myVar[myVar>(3*iqr)] # return outliers 3 times the IQR
+
+'Outside 1.5 times the 75th %ile'
+third_quartile<-quantile(myVar, 0.75)
+myVar[myVar>1.5*third_quartile]
+
+'how do you treat outliers? one way is capping. CAPPING= replace the outliers with the 0.95 or 0.05 quantile value'
+myVar <- Prestige$income
+myVar[myVar>quantile(myVar, 0.95)] <-quantile(myVar, 0.95) # above 95% capped
+myVar[myVar<quantile(myVar, 0.05)] <-quantile(myVar, 0.05) # below 5% capped
+
+"CHALLENGE. cap Income in Prestige with 99% and 1%"
+myVar[myVar>quantile(myVar, 0.99)] <- quantile(myVar, 0.99)
+myVar[myVar>quantile(myVar, 0.01)] <- quantile(myVar, 0.01)
+```
+
+--- Treating Missing values ---
+Missing values types:
+  1 MCAR: missing completely at random (in this video we deal with these)
+  2 MNAR: missing not at random, they have a pattern or a reason.
+
+If you have a huge dataset maybe you can delete the MV. If the variable is the major contributor of MV in the dataset, consider removing the variable column instead that the row
+```{r Treating Missing values}
+Prestige_miss <- read.csv(
+  "https://raw.githubusercontent.com/selva86/datasets/master/Prestige_miss.csv")
+myData <- Prestige_miss
+head(myData)
+
+library(Hmisc)
+myData$educationz <- impute(myData$education, mean) # continuos variable
+myData$type <- impute(myData$type, mode) # categorical variable
+
+'mice package to predict outliers'
+#install.packages("mice")
+library(mice)
+
+myData <- Prestige_miss
+micemod <- mice(myData) # by default he uses predictive mean matching. it shows a "predictoMatrix"
+myData2 <- complete(micemod,1) # check micemod. the second arg goes from 0 to dataset$m variables. 0 returns the original dataset. default is 1
+anyNA(myData2) # we removed outliers
+
+'challange. fill missing data cars93 dataset with mice'
+cars93_miss <- read.csv(
+  "https://raw.githubusercontent.com/selva86/datasets/master/Prestige_miss.csv")
+head(cars93_miss); anyNA(cars93_miss)
+
+miced_dataset <- mice(cars93_miss) # transform in mice obj to "complete" the NA
+cars93_2 <- complete(miced_dataset,1)
+anyNA(cars93_2)
+```
+
+
+----------------------
+*SECTION 2: Regression Modelling for continuos variables*
+----------------------
+**TOPICS: how to model linear models**
+- Introduction to liner regression
+- Interpreting results and interaction analysis
+- Residual Analysis
+- Best subsets, stewise, and coparing models with ANOVA
+- Checking over fitting and cross validation
+- non linear models with splines and GAM
+
+--- Building Linear Regression ---
+Mostly used because it's easier to express causality and relationship between variables. Also there is the pvalue which establish whether the relations are statistical significant.
+
+Things to cover in this lesson:
+- Types of variables (already seen). Y is dependent, the one we want to predict. X are independent variables (other names: explanatory, predictors, covarates, features)
+- The purpose and concept behind lienar regression
+- Creating, training and testing samples: "development and validation samples"
+- How to build lienar regression models in R
+- Tydying up the results using broom package
+- how to predict on new daa
+- Evaluating regression models
+- Challenge
+
+$$ Y= \beta_{0}+\beta_{1}X_{1}+\epsilon$$
+Where: 
+- Y= dependent
+- B1= intercept
+- B2= slope
+- X1= independent variable
+- $\epsilon$= random error or residual   
+
+```{r Building Linear Regression}
+data("Prestige"); head(Prestige)
+
+'training data= development sample; test_data= validating data'
+# build model on training data. then use test data Xs to compute y-test. compare predicted y with model y. this establish accuracy of the model. In real world, instead of y-test we will have real data.
+set.seed(100) # the random sampling can be reproduced with this seed
+train_rows <- sample(1:nrow(Prestige), 
+                     size=0.7*nrow(Prestige)) # take randomw rows from 70% of data
+training <- Prestige[train_rows,]
+test <- Prestige[-train_rows,] # the remaining 30% go into test data
+
+dim(training); dim(test)
+
+'How to build lienar regression models in R'
+lmmod <- lm(prestige~income+education, data=training)
+summary(lmmod) # think it as the equation above
+
+'tidy results in a publishable table'
+library(broom)
+lmmod_df <- tidy(lmmod)
+
+'predict on the test or validating sample'
+predicted <- predict(lmmod, newdata=test) # the equation previously written on new data
+
+'Evaluating regression models OUT-OF-SAMPLE' 
+# we use MSE and MAPE. the lowest the error the more accurate is the model
+mean((test$prestige-predicted)^2) #MSE. (the first is validation error, in reality is the observation/the actual data)
+mean(abs(test$prestige- predicted)/test$prestige) #MAPE
+
+'challange: MSE and MAPE on training data for lmmod
+THIS MEANS EVALUATING THE MODEL IN-SAMPLE' #IMPORTANT! UNDERSTAND THE DIFFERENCE vs out-sample
+predicted <- predict(lmmod, newdata=training)
+mean((training$prestige-predicted)^2) #MSE
+mean(abs(training$prestige-predicted)/training$prestige) #MAPE
+```
+
+--- Interpreting results and interaction analysis ---
+
+Things to cover in this lesson:
+- interpreting summary of lm model: R^2; Adj R^2; pvalue; tvalue; Fstatistic; AIC and BIC; creating interaction variables; variance inflation factor
+
+$$R^2=\frac{TSS-RSS}{TSS}=1-\frac{RSS}{TSS}=1-\frac{\sum_{i=1}^n (y_{i}-\hat y_{i})^2}{\sum_{i=1}^n (y_{i}-\bar y)^2}=\rho^2$$
+$$R^2_{Adj}=1-(\frac{(1-R^2)(n-1)}{n-1}) \space n=obs; q=coefficients$$
+$$T-test = \frac{\beta s}{SE}$$
+$$VIF_{j}=\frac{1}{1-R^2_{j}}$$
+```{r Interpreting results and interaction analysis}
+'previous model'
+data("Prestige")
+
+set.seed(100) 
+train_rows <- sample(1:nrow(Prestige), size=0.7*nrow(Prestige))
+training <- Prestige[train_rows,]
+test <- Prestige[-train_rows,] 
+
+lmmod <- lm(prestige~income+education, data=training)
+summary(lmmod) 
+
+'interpretation of the summary'
+# summary: B values estimated ; standard error; ttest=estimate B/st error; pvalue (H0 beta=0)
+# Only statistical significant variable are retained
+# Rsquare represent how well ur model fit the data. Adj R^2 penalies you for the # of estimation because R^2 increases as the number of regressors increases. Adj is better to comapre models.
+# tvalue and pvalue tell you the same information: whether the relation is statistically significant.
+
+# Fstatistic; 
+#AIC and BIC; 
+
+'other important tools in a regression'
+#variance inflation factor: on variable significant in one model can become insignificant in another. MULTICOLLINEARITY DISCOVERING. if a variable has a high VIF, this information is explained already by another variable. cut off at 2.
+vif(lmmod)
+
+#creating intercation variables; 
+lmmod2 <- lm(prestige~income+education+income:education, data=training)
+
+# I() function to change variables and +0 or -1 to remove intercept
+lmmod3 <- lm(prestige~income+I(education^2)+0, data=training)
+
+'fitted values: 3 different methods to call them'
+lmmod <- lm(prestige~income+education, data=training)
+
+fitted(lmmod) #1
+lmmod$fitted.values #2
+fitted_vals <- predict(lmmod) #3
+training$prestige-fitted_vals
+```
+
+--- Residual Analysis ---
+Things to cover in this lesson:
+- residual analysis
+- extreme/influential values with cooks distance
+- understand OLS assumptions:
+  1. regressor model is lienar in parametrs
+  2. mean of residals is zero, conditional on independent variables
+  3. the predictors are linearly indepenent of each other
+  4. the residuasl are uncorrelated
+  5. homoscedasticity
+  5. normality of residuals
+```{r Residual Analysis}
+data("Prestige")
+set.seed(100)
+train_rows <- sample(1:nrow(Prestige), size=0.7*nrow(Prestige))
+training <- Prestige[train_rows,]
+test <- Prestige[-train_rows,] 
+lmmod <- lm(prestige~income+education, data=training)
+summary(lmmod)
+par(mfrow=c(2,2))
+plot(lmmod) #1,1 red line should be flat. if it's not=heteroskedasticity
+            #2,1 residual should follow normal distribution of the qqplot
+            # 2,2: standardized residual. cook's distance: compute distance for all the points and shows how influential are the poins. what if i remove this point? if you take the log, you should improve. this last plot can be studied more by some specific functions...
+```
+
+--- Extracting better models. Best subsets, stewise, and coparing models with ANOVA ---
+Things to cover in this lesson:
+- best subsets regression
+- stepwise regression
+- comparing models with ANOVA
+- challange
+
+```{r Extracting better models}
+'previous model'
+data("Prestige")
+
+set.seed(100) 
+train_rows <- sample(1:nrow(Prestige), size=0.7*nrow(Prestige))
+training <- Prestige[train_rows,]
+test <- Prestige[-train_rows,] 
+
+lmmod <- lm(prestige~income+education, data=training)
+summary(lmmod) 
+
+'best subset leaps package'
+#install.packages("leaps")
+library(leaps)
+regsubsMod=regsubsets(prestige~education+income+type+women, data=Prestige)
+par(oma=c(2,0,0,0))
+plot(regsubsMod, scale="bic") # we compare based on BIC. the best model choosen is in black. each rows represent a model. it includes the variables below the bar. in this case: intercept, education, income and typeprof.  
+
+'best subset leaps package including interaction. shows u best model'
+regsubsMod2=regsubsets(prestige~education*income*type*women, data=Prestige)
+plot(regsubsMod2, scale="adjr2")
+
+'stepwise regression: iterations to find best model by AIC (harsher restriciton);
+it shows all the combination and tell you the best model'
+# step 1: remove NA
+miced_data <- mice(training) # transform in mice obj to "complete" the NA
+Prestige2 <- complete(miced_data,1)
+anyNA(Prestige2)
+
+# step 1
+base.mod <- lm(training$prestige~1,data=Prestige2) # define model with 1 regressor
+all.mod <- lm(training$prestige~.,data=Prestige2) # define model with all regressors
+
+# step 2 
+stepMod <- step(base.mod,
+                scope=list(lower=base.mod, upper=all.mod),
+                direction="both", trace=1, steps=1000) 
+
+
+'comparing models with ANOVA. make sure they are nested one another'
+mod1 <- lm(prestige~education, data=Prestige2)
+mod2 <- lm(prestige~education+income, data=Prestige2)
+mod3 <- lm(prestige~education+income+type, data=Prestige2)
+mod4 <- lm(prestige~education+income+type+women, data=Prestige2)
+anova(mod1,mod2, mod3, mod4) # if it's not significant, means the innested added variable is not necessary. model 2 is the best
+
+'challenge: from "prestige" dataset find best model to predict "prestige" using stepwise regression considering all possible INTERACTIONS and eliminate VIF>4 variables'
+data("Prestige")
+train_row_challenge <- sample(1:nrow(Prestige), size=0.7*nrow(Prestige))
+train_challange <- Prestige[train_row_challenge,]
+test_challange <- Prestige[-train_row_challenge,]
+
+miced_data <- mice(train_challange) # transform in mice obj to "complete" the NA
+Prestige2 <- complete(miced_data,1)
+anyNA(Prestige2)
+
+base.mod.challenge <- lm(prestige~1, data=Prestige2)
+all.mod.challenge <- lm(prestige~education*income*type*women, data=Prestige2)
+
+stepMod <- step(base.mod.challenge,
+                scope=list(lower=base.mod.challenge, upper=all.mod.challenge),
+                direction="both",trace=1,steps=1000)
+summary(stepMod)
+vif(stepMod) # hence remove type and education:type!
+stepMod2 <- update(stepMod, .~. -education:type, data=Prestige2)
+vif(stepMod2) # now all variances are below 4! no multicollinearity problems.
+```
+
+--- Checking over fitting and cross validation: KFOLD ---
+Cross validation of the model to see how it would work in practise. 
+cross validation: building a model in one dataset and test a prediction error in more than one sample. The "k" in k-fold are the number of samples
+```{r KFOLD}
+data("Prestige")
+Prestige <- na.omit(Prestige)
+
+'kfold'
+library(boot)
+glmmod <- glm(prestige~income+education+education+type, data=Prestige)
+cv.glm(Prestige, glmmod, K=5)$delta # it gives MSE and adjusted MSE across the kfolds of cross validation. the lower the error the more stable and reliable the model is.
+
+'challange1 and challange2 (just challenge 1)
+1. do a 5fold validation on the following models, find out which one is most suited with lowest MSE'
+glmmod1 <- glm(prestige~income+education, data=Prestige)
+glmmod2 <- glm(prestige~education+type+income, data=Prestige)
+glmmod3 <- glm(formula=prestige~education+type+income+type:income, data=Prestige)
+cv.glm(Prestige, glmmod1, K=5)$delta
+cv.glm(Prestige, glmmod2, K=5)$delta
+cv.glm(Prestige, glmmod3, K=5)$delta
+
+```
+
+--- non linear models with splines and GAM ---
+up to now the best fit was a linear line. in this class:
+- smoothing curves with smooth.spline()
+- natural cubic splines
+- generalized additive models(GAMs)
+- challange
+```{r SPLINES AND GAMs}
+'data train and test'
+data("Prestige")
+Prestige <- na.omit(Prestige)
+set.seed(100)
+train_rows <- sample(1:nrow(Prestige), size=nrow(Prestige)*0.7)
+training <- Prestige[train_rows,]
+test <- Prestige[-train_rows,]
+
+'income and prestige relation is linear up to a certain point: lets fit a smooth line'
+plot(x=training$income,y=training$prestige)
+
+sp_2 <- smooth.spline(x=training$income,y=training$prestige, df=2)
+sp_10 <- smooth.spline(x=training$income,y=training$prestige, df=10)
+sp_20 <- smooth.spline(x=training$income,y=training$prestige, df=20)
+sp_50 <- smooth.spline(x=training$income,y=training$prestige, df=50)
+sp_cv <- smooth.spline(x=training$income,y=training$prestige, cv=T); sp_cv$df # cross validation to find optimal degrees of freedom
+
+# increasing degrees of freedom the more curvature it gets.
+plot(x=training$income,y=training$prestige)
+lines(sp_2, col="blue")
+lines(sp_10, col="green")
+lines(sp_20, col="orange")
+lines(sp_50, col="grey")
+lines(sp_cv, col="red", lwd=2) #top
+
+'evaluating smoothing'
+#install.packages("DMwR")
+library(DMwR)
+predicted <- predict(sp_cv, test$income)$y
+regr.eval(test$prestige, predicted) # gives mae, mse, rmse, mape
+
+'splines package'
+library(splines)
+head(ns(Prestige$income, df=3)) # ns= natural spline; with 3df.
+
+'GAM'
+# we can use non linear functions of x thanks to GAM. additive because we add non linear functions other than the linears.
+library(mgcv)
+gamMod <- gam(prestige~ns(income,3)+ns(education,4)+type, data=training)
+predicted <- predict(gamMod, test)
+regr.eval(test$prestige, predicted)
+
+'challenge'
+data("cars")
+cars1 <- cars[1:30, ]  # original data
+cars_outliers <- data.frame(speed=c(19,19,20,20,20), dist=c(190, 186, 210, 220, 218))  # introduce outliers.
+cars2 <- rbind(cars1, cars_outliers)  # data with outliers.
+
+# plot
+plot(cars2$speed, cars2$dist, pch="*", col="red", main="Dist Vs. Speed", xlab="Speed", ylab="Dist")
+abline(lm(dist ~ speed, data=cars2), col="blue", lwd=3, lty=2)
+
+# Fit linear model and plot
+lmmod <- lm(dist ~ speed, data=cars2)  # fit model
+predicted_lm <- predict(lmmod, cars2)  # predict
+regr.eval(cars2$dist, predicted_lm) # -------------- these are the errors to compare
+
+# gam
+glmmod_challenge <- gam(dist~ns(speed,3),data=cars2)
+predicted_gam <-predict(glmmod_challenge) 
+regr.eval(cars2$dist, predicted_gam)
+
+#plot
+plot(cars2$speed, cars2$dist, pch="*", col="red")
+lines(cars2$speed, predicted_gam)
+
+```
+
+
+----------------------
+*SECTION 3: Regression Modelling for categorical variables*
+----------------------
+**TOPICS: classification models**
+- how to model and predict categorical variables using:
+  1. logistic regression, naive bayes, KNN, rpart, cTree and C5.0
+  2. The concepts
+  3. understanding accuracy measures
+  4. how to build any predictive models with caret package
+  5. advanced feature selechniques (parallelisaiton)
+
+
+--- logistic regressions ---
+classification model in this video:
+1. concept
+2. training and testing data with caret pkg
+3. class imbalances with down and up sampling
+4. logistic model
+5. accuracy measures: specificiy, sensitivity and interpretation
+6. concordance and discordance 
+7. roc curve and auroc
+8. challenge
+
+Logistic regression is designed to binary classification: probability of the event. the event can be one of the two classes. U can use GLM function by setting the family as "binomial".
+
+```{r logistic regression}
+data(BreastCancer, package="mlbench")
+bc <- BreastCancer[complete.cases(BreastCancer),] # create copy
+
+'predict if the breast (y) is benign or malignus'
+# the variables are in ordered factors for all the features
+# convert a factor into character and then into numeric
+
+for (i in 1:9){ # first convert into characters then into numeric
+  bc[,i] <- as.numeric(as.character(bc[,i]))
+}
+
+bc$Class <- ifelse(bc$Class=="malignant",1,0) # set malign=1 and benign=0
+bc$Class <- factor(bc$Class, levels=c(0,1)) 
+table(bc$Class) # there is a class imbalance. 2 problems. 1st the sample is not in equal proportions-> handled by downsampling: the majority class data is randomly sampled to be at the same size of the smaller class. we randomly pick from benign class to match number of  malign cancers.
+
+'train and test data by caret package'
+library(caret)
+'%ni%' <- Negate('%in%') # define not in function
+
+options(scipen=999) # prevent printing scientific notations
+
+set.seed(100)
+trainDataIndex <- createDataPartition(bc$Class, p=0.7, list=F)
+trainData <- bc[trainDataIndex,]
+testData <- bc[-trainDataIndex,]
+
+'downsampling function' # require y in factor class
+set.seed(100)
+down_train <- downSample(x=trainData[,colnames(trainData)%ni%"Class"],
+                         y=trainData$Class)
+table(down_train$Class) # 168 vs 168 as expected
+
+#'upsampling function' --> we use downsampling
+#set.seed(100)
+#up_train <- upSample(x=trainData[,colnames(trainData)%ni%"Class"],
+#                      y=trainData$Class)
+#table(up_train)
+
+'logit model using glm, notice "binomial" family'
+logitmod <- glm(Class~Cl.thickness+Cell.size+Cell.shape, 
+                family=binomial, data=down_train) # family binomial
+summary(logitmod)
+
+pred <- predict(logitmod, newdata=testData, type="response") # probability of the event per each observation. we take below the probability cut off of 0.5 and predict if it is bad or not. 
+
+y_pred_num <- ifelse(pred>0.5,1,0)
+y_pred <- factor(y_pred_num, levels=c(0,1))
+y_act <- testData$Class
+
+y_pred
+y_act
+
+'accuracy'
+#install.packages("e1071")
+mean(y_pred==y_act)
+confusionMatrix(y_pred,y_act, positive="1") #awesome. about accuracy of model
+# sensitivity is the proportion of actual events that aour mordel predicted as event. 70/(70+1) = 98.59%.
+# specificity: proportion of non evnts taht model predicted correctly. 122/(122+11)=91.73%
+#detection rate is the proportion of the whole sample where the evnet is computed correctly
+#70/(70+11) recall is porportion of actual evnets predicted correctly ("wikipedia.org/wiki/Confusion_matrx")
+
+#best model is trade off between sensitivity and specificity. specificity focuses on non events. sensitivity focus on predicting the event correctly.
+
+'roc curve=area under the ROC curve=accuracy'
+#install.packages("InformationValue")
+library(InformationValue)
+plotROC(y_act,pred)
+AUROC(y_act, pred) 
+# interpreting ROC plot is different. greater the area the better. for a good model the area surge steeply.
+
+'concordance and discordance'
+# concorance is the percentage of pairs, where the true envents probability scores are greater than the scores of true non events. we take all combinations of true events  and non events. concordance is the percentage of pais where true events probability scores are greater than the scores of non true events. perfect model=100%. higher the concorcande the beteter the quality of model. use concordance function in information value package.
+
+```
+
+--- naive bayes classifier for categorical variable---
+
+Conditional probability of A given B $P(A|B)$ is the probability of event A occurring given that B has already occurred. Here we want to compute the probability of Y given that X has already occurred.
+$Bayes \space Rule: P(Y=k|X)=\frac{P(X|Y=k)*P(Y=k)}{P(X)}$ which becomes the Naive Bayes model when the observations are assumed to be independent (naive term is due to this "naive" assumption): $P(Y=k|X1..Xn)=\frac{P(X1|Y=k)P(X2|Y=k)...P(Xn|Y=k)*P(Y=k)}{P(X1)*P(X2)...P(Xn)}$. $$PosteriorProbability=\frac{LogLikelihood Of Evidence * PriorDistribution}{ProbabilityOfEvidence}$$
+
+Example of table with 3 binary variables 
+
+------------------------------------------------------------------
+type   | Long| NotLong| Sweet| NotSwee|yello|NotYellow|Total
+------------------------------------------------------------------
+Banana| 400  |  100   |  350  | 150    | 450 | 50     | 500
+------------------------------------------------------------------
+Orange|   0  |  300   |  150  | 150    | 300 |  0     | 300
+------------------------------------------------------------------
+Other| 100  |  100   |  150   | 50    |   50 | 150     | 200
+------------------------------------------------------------------
+Total | 500  |  500   |  650  | 350    | 800 | 200     | 1000
+------------------------------------------------------------------
+
+step1: compute priors dividing the per variable total in the rows by abs total
+P(Banana)=500/1000
+P(Orange)=300/1000
+P(Other)=200/1000
+
+steps2: compute the probability of evidence (denominator) dividing the per class total by abs total
+P(Long)=500/1000
+P(Sweet)=650/1000
+P(Yellow)=800/1000
+
+steps3: compute the probability of likelihood. we should do for the other fruits as well. here we've done only for the banana.
+P(Long|Banana)=400/500
+P(Sweet|banana)=350/500
+P(Yellow|Banana)=450/500
+
+step4: if a fruit is long sweet and yellow what fruit is it?
+$$P(Banana|long, sweet, yellow)=\frac{P(long|banan)P(sweet|banana)P(yellow|banana)}{P(long)P(sweet)P(yellow)} = \frac{0.8*0.7*0.9 *0.5}{P(evidence)}$$
+The denominator is the same for all the 3 classes so is optional to compute it if you want to comapre them.
+
+What happen when X is continuos? we need to assume a parametric distribution --> normal distribution usually. thus the density probability $p(x=v|c)=\frac{1}{\sqrt(2\pi\sigma^2_{c})}e^-(\frac{(v-\mu c)^2}{2\sigma^2_{c}})$
+
+```{r naive bayes}
+'import data'
+Vehicle <- read.csv("https://goo.gl/N0PZtY")
+head(Vehicle)
+
+'train and test'
+library(caret)
+set.seed(100)
+train_rows <- createDataPartition(Vehicle$Class, p=0.7, list=F)
+train <- Vehicle[train_rows,]
+test <- Vehicle[-train_rows,]
+
+'study feature with feature plot; with klaR and with conf matrix'
+featurePlot(Vehicle[,-19],Vehicle[,19],plot="box")
+# useful feature is the one with different in the ean
+#install.packages("klaR")
+library(klaR)
+nb_mod <- NaiveBayes(Class~.,data=train)
+pred <- predict(nb_mod,test)
+mean(test$Class!=pred$class) # misclassification rate
+
+tab <- table(pred$class, test$Class)
+caret::confusionMatrix(tab) # based on the class
+
+plot(nb_mod) # the more the separation the more useful the class is
+
+'CHALLENGE: USE NAIVE BAYES CLASSIFIER TO RPEDICT THE CLASS OF SPECIES FROM THE IRIS DATASET IN DATASETS PACKAGE, CALCULATE THE MISCLASSIFICAITON RATE AND CONFUSION MATRIX'
+library(caret)
+set.seed(100)
+train_rows <- createDataPartition(iris$Species, p=0.7, list=F)
+train <- iris[train_rows,]
+test <- iris[-train_rows,]
+
+featurePlot(iris[,-5], iris[,5], plot="box") # we can expect high accuracy because the classes have diff means within classes
+
+library(klaR)
+nb_mod <- NaiveBayes(Species~.,data=train)
+pred <- predict(nb_mod,test)
+mean(test$Species!=pred$class) # misclassification rate
+
+tab <- table(pred$class, test$Species)
+caret::confusionMatrix(tab)
+
+plot(nb_mod) 
+```
+
+----------------------
+*SECTION 4: Core Machine Learning*
+----------------------
+**TOPICS:**
+- Support Vector Machines SVM
+- Bagging with Random Forest
+- Boosting with GBM
+- Regulatization: Ridge and Lasso Regression (L1 and L2 regularization)
+- XGBoost (good for winning kagle competitions)
+
+--- Support Vector Machines SVM ---
+In this topic:
+  1. When does SVM excel vs other
+  2. How SV classifier works: Support vectors, Hyper planes, Kernel tricks, tuning parameters
+  3. Implementing and tuning using Caret Package: linear, radial and polynomial kernel
+  4. challenge
+
+```{r SVM}
+# Training SVM Models
+library(caret)
+
+#######################
+# My PC is so slow running these SVM
+######################
+
+
+'Load the data and create training and test samples'
+data(segmentationData, package = "caret")
+# segmentationData <- read.csv("https://goo.gl/1iycql")
+set.seed(100)
+trainRows <- createDataPartition(segmentationData$Class,
+                                 p=.7,
+                                 list=FALSE)
+trainData <- segmentationData[trainRows, -c(1:2)]
+testData  <- segmentationData[-trainRows, -c(1:2)]
+table(segmentationData$Class)
+
+set.seed(100)                     
+
+
+'SVM Linear Kernel -----------------------------------'
+# setup trainControl
+ctrl <- trainControl(method="repeatedcv",   # 10 fold cross validation
+                     repeats=5,		    # 5 repeats of cv
+                     summaryFunction=twoClassSummary,	# To get AUROC
+                     classProbs=TRUE,
+                     sampling='down')
+
+
+grid <- expand.grid(C = c(0.25, 0.5, 0.75, 1, 1.25, 1.5)) # we have only 1 tuning parameter "C" = cost function
+
+#Train and Tune the SVM
+svmLin_mod <- train(Class ~ ., data = trainData, 
+                    method = "svmLinear",
+                    preProc = c("center","scale"),
+                    metric="ROC",
+                    tuneGrid = grid,
+                    trControl=ctrl)	
+svmLin_mod # ROC is choosen as measurement for optimal model
+
+
+
+
+'SVM - Radial Kernel -----------------------------------------'
+# Setup model tuning
+grid <- expand.grid(sigma = c(.01, .015, 0.2), # u have to add the sigma parameter
+                    C = c(0.25, 0.5, 0.75, 1, 1.25, 1.5))
+grid 
+
+# Train SVM
+svmRad_mod <- train(Class ~ ., data = trainData, 
+                    method = "svmRadial",
+                    preProc = c("center", "scale"), 
+                    metric="ROC", 
+                    tuneGrid = grid,
+                    trControl=ctrl)
+
+svmRad_mod # sigma 0.01 and C=1.5
+
+
+'SVM - Polynomial Kernel -----------------------------------------'
+grid <- expand.grid(C = c(0.25, 0.5, 0.75, 1, 1.25, 1.5),
+                    degree=c(1, 2, 3), # add degree to be tooned
+                    scale=c(.001, 0.01, 0.1)) # add scale to be tooned
+grid
+
+svmPoly_mod <- train(Class ~ ., data = trainData, 
+                     method = "svmPoly",
+                     preProc = c("center","scale"),
+                     metric="ROC",
+                     tuneLength = 3, #3 cross 3 cross 3 meaning 27 models be created
+                     trControl=ctrl)	
+svmPoly_mod # best model: degree 3, scale 0.01 and c=0.25
+
+
+
+'Resamples (Compare models) -----------------------------------------'
+comparisons <- resamples(list(linear=svmLin_mod, 
+                              radial=svmRad_mod, 
+                              poly=svmPoly_mod))
+summary(comparisons) # the radial has higher mean in ROC and senssitivity, but polynomial is better in specificity
+comparisons$values
+
+
+'Plot the summary results: we use radial'
+bwplot(comparisons, 
+       metric="ROC", 
+       ylab =c("Linear", "Radial", "Polynomial"))  # boxplot
+
+'Predict model using radial'
+pred <- predict(svmRad_mod, testData)
+caret::confusionMatrix(pred, testData$Class, positive = "WS") # accuracy of 80%
+
+
+'Challenge: predict the type of glass using SVM and tune it for best possible ROC.'
+#install.packages("mlbench")
+#install.packages("MLmetrics")
+library(mlbench)
+library(MLmetrics)
+
+# Load the data and create training and test samples.
+data(Glass, package = "mlbench")
+# Glass <- read.csv("https://goo.gl/sdIBpS")
+levels(Glass$Type)
+levels(Glass$Type) <- make.names(levels(Glass$Type)) # stupid names by this function beacuse u need to give names to features
+levels(Glass$Type)
+
+set.seed(100)
+trainRows <- createDataPartition(Glass$Type,p=.7,list=FALSE)
+trainData <- Glass[trainRows, ]
+testData  <- Glass[-trainRows, ]
+
+# setup trainControl
+ctrl <- trainControl(method="repeatedcv",   # 10 fold cross validation
+                     repeats=5,		    # 5 repeats of cv
+                     summaryFunction=multiClassSummary,	# To get AUROC
+                     classProbs=TRUE)
+
+# Setup model tuning
+grid <- expand.grid(sigma = c(.01, .1, 0.2, .5, 1),
+                    C = c(0.25, 0.5, 1, 5, 10, 15))
+
+# Train SVM
+svmRad_mod_cl <- train(Type ~ ., data = trainData, 
+                       method = "svmRadial",
+                       preProc = c("center", "scale"), 
+                       metric="Mean_ROC", 
+                       tuneGrid = grid,
+                       trControl=ctrl)
+
+svmRad_mod_cl # there a many parameters, u are safe looking at mean_ROC
+
+pred <- predict(svmRad_mod_cl, testData)
+confusionMatrix(pred, testData$Type)
+```
+
+--- Bagging with Random Forest ---
+  1. what is bagging
+  2. RF algorithm
+  3. why RF excel
+  4. implementation and tuning parameters
+
+- Bootstrap is a random sample drawn with replacement, same size as original dataset. Bagging is Bootstrap aggregation.
+- How RF works: select number of trees to grow (ntree); for i=1 to ntree it randomly sample with replacement, same size as original data; it grows a tree; for every split of tree it randomly select mtry predictors and randomly sect mtry predictors (on both branches); and finaly it grow tree till stopping criteria is reached. End.
+NB the best number of features is tipically mtry of p/3 or sqrt(p) where p is the number of preditors. what comes out is a random forest. the final prediction is the mean prediction. as a result the variance is reduced.
+```{r Random Forest}
+'Setup'
+#install.packages("doMC")
+#install.packages("randomForest")
+#install.packages("import")
+library(caret)
+library(doMC)
+library(randomForest)
+library(import)
+registerDoMC(cores = 4)
+
+'Load the data and create training and test samples'
+data(segmentationData, package = "caret")
+set.seed(100)
+trainRows <- createDataPartition(segmentationData$Class,p=.7,list=FALSE)
+trainData <- segmentationData[trainRows, -c(1:2)]
+testData  <- segmentationData[-trainRows, -c(1:2)]
+
+'setup trainControl'
+ctrl <- trainControl(method="repeatedcv",   # 10 fold cross validation
+                     repeats=5,		    # 5 repeats of cv
+                     summaryFunction=multiClassSummary,	# To get AUROC
+                     classProbs=TRUE)
+
+ncol(trainData) #59
+grid <- expand.grid(mtry = c(2, 8, 15, 20, 30)) # make sure sqrt and /3 are
+
+system.time({
+  parRF_mod <- train(Class ~ ., data = trainData, 
+                     method = "parRF",  # ranger, faster implementation
+                     preProc = c("center","scale"),
+                     metric="ROC",
+                     tuneGrid=grid,
+                     trControl=ctrl)	  
+})
+
+parRF_mod
+pred <- predict(parRF_mod, testData)
+caret::confusionMatrix(pred, testData$Class)
+
+
+
+'implement cforest that take statistical significance into consideration when selecting features'
+source("https://goo.gl/ZniFaV")
+set.seed(100)                     
+
+# setup trainControl
+ctrl <- trainControl(method="repeatedcv",   # 10 fold cross validation
+                     repeats=5,		    # 5 repeats of cv
+                     summaryFunction=multiClassSummary,	# To get AUROC
+                     classProbs=TRUE)
+
+# Train and Tune the random forest
+
+grid <- expand.grid(mtry = c(2, 8, 15, 20, 30))
+grid
+
+
+system.time({
+  cforest_mod <- train(Class ~ ., data = trainData, 
+                       method = "cforest",
+                       preProc = c("center","scale"),
+                       metric="ROC",
+                       tuneGrid=grid,
+                       trControl=ctrl)	  
+})
+
+
+modelLookup('cforest') # to know which parameters to tuned
+
+cforest_mod
+pred <- predict(cforest_mod, testData)
+caret::confusionMatrix(pred, testData$Class)
+```
+
+```{r RF AND BOOSTING FROM ISL book}
+#install.packages("ISLR") 
+#install.packages("randomForest") 
+#install.packages("tree") 
+#install.packages("prettyGraphs") 
+library(ISLR) 
+library(caret) 
+library(randomForest) 
+library(tree) 
+library(prettyGraphs) 
+
+################################################################################# 
+'DECISION TREE: DO IT PRIOR RANDOM FOREST TO UNDERSTAND' 
+################################################################################# 
+'1 create a training set and fit the tree to the training data' 
+library(MASS) 
+set.seed(1) 
+train = sample (1:nrow(Boston), nrow(Boston)/2) 
+tree.boston=tree(medv~.,Boston , subset=train) 
+summary(tree.boston) 
+
+#only 3 of the variables are used for contructing the tree. in a regression tree the deviance is simply the sum of squared errors for the tree 
+
+'plot tree' 
+plot(tree.boston) 
+text(tree.boston , pretty =0) 
+
+#the tree indicates that lowervaluesof lstat correspond to more expensive houses. tree precit a median house price of 46k for larger homes in suburbs in which residents have high socioeconomic status 
+
+'pruning to hopefully improve performance' 
+#if u prune the tree 
+prune.boston=prune.tree(tree.boston ,best=5) 
+plot(prune.boston) 
+text(prune.boston , pretty =0) 
+
+#crossvalidation result by not puning but keeping most complex tree 
+cv.boston=cv.tree(tree.boston) 
+plot(cv.boston$size ,cv.boston$dev ,type="b") 
+
+'make prediction on test set' 
+yhat=predict (tree.boston ,newdata=Boston[-train ,]) #test data 
+boston.test=Boston[-train ,"medv"] 
+plot(yhat ,boston.test) 
+abline (0,1) 
+mean((yhat -boston.test)^2) 
+
+# In other words, the test set MSE associated with the regression tree is 25.05. The square root of the MSE is therefore around 5.005, indicating that this model leads to test predictions that are within around $5, 005 of the true median home value for the suburb. 
+
+
+
+################################################################################# 
+'RANDOM FOREST AND BAGGING' 
+################################################################################# 
+
+'perform random forest' 
+library( randomForest) 
+set.seed(1) 
+bag.boston= randomForest( medv~.,data=Boston , subset=train , 
+                          mtry=13,importance =TRUE) # mtry=13 is tellingto use all 13 variables. in other words, that bagging should be used. 
+bag.boston # mse 10.77 and %var explained is 87% 
+
+'how well we performed' 
+yhat.bag = predict (bag.boston , newdata=Boston[-train ,]) 
+plot(yhat.bag , boston.test) 
+abline (0,1) 
+mean((yhat.bag -boston.test)^2)#13%, half than the normal tree. very good. 
+
+'try changing the number of tree by chaning ntree parameter' 
+bag.boston= randomForest( medv~.,data=Boston , subset=train , 
+                          mtry=13,ntree=25) 
+yhat.bag = predict (bag.boston , newdata=Boston[-train ,]) 
+mean((yhat.bag -boston.test)^2) # with 25 trees we dont improve the model 
+
+'grow a different forest by changing the variable used tuning mtry' 
+set.seed(1) 
+rf.boston= randomForest(medv~.,data=Boston , subset=train , 
+                        mtry=6, importance =TRUE) 
+yhat.rf = predict(rf.boston ,newdata=Boston[-train ,]) 
+mean((yhat.rf-boston.test)^2) #11%mse 
+
+'check the variable importance in the forest and plot it' 
+importance(rf.boston) # Two measures of variable importance are reported. The former is based upon the mean decrease of accuracy in predictions on the out of bag samples when a given variable is excluded from the model. The latter is a measure of the total decrease in node impurity that results from splits over that variable, averaged over all trees. 
+
+varImpPlot(rf.boston) 
+
+################################################################################# 
+'BOOSTING' 
+################################################################################# 
+
+#Here we use the gbm package, and within it the gbm() function, to fit boosted gbm() regression trees to the Boston data set. We run gbm() with the option distribution="gaussian" since this is a regression problem; if it were a binary classification problem, we would use distribution="bernoulli". The argument n.trees=5000 indicates that we want 5000 trees, and the option interaction.depth=4 limits the depth of each tree. 
+#install.packages("gbm") 
+library (gbm) 
+set.seed(1) 
+boost.boston=gbm(medv~.,data=Boston[train ,], distribution="gaussian",n.trees=5000, 
+                 interaction.depth=4) 
+'the summary show predominance of lstat' 
+summary(boost.boston) 
+
+'partial dependence plots for the two variables' 
+#show marginal effect of the selected variables on the response after integratingout the other variables 
+par(mfrow=c(1,2)) 
+plot(boost.boston ,i="rm") 
+plot(boost.boston ,i="lstat") 
+
+'use boosted model to predict y' 
+yhat.boost=predict (boost.boston ,newdata =Boston[-train ,],n.trees=5000) 
+mean((yhat.boost - boston.test)^2) #11.8 similar as before 
+
+'perform boosting with a different shrinkage parameter lambda. default is 0.001. if we take 0.2 we obtain 11.5mse' 
+boost.boston=gbm(medv~.,data=Boston[train ,], 
+                 distribution="gaussian",n.trees =5000, 
+                 interaction.depth =4, shrinkage =0.2,verbose=F) 
+yhat.boost=predict (boost.boston ,newdata =Boston[-train ,],n.trees=5000) 
+mean((yhat.boost - boston.test)^2) 
+```
+
+```{r RANDOM FOREST FROM YOUTUBE for classication and not regression}
+'data aquisition'
+#install.packages("randomForest") #NB randomForestSRC is another package particorlarly cool for visualization
+library(randomForest)
+#diabet <- read.csv("Diabetes.csv") # i don't have this csv
+View(diabet)
+
+'divide dataset'
+set.seed(3)
+id <- sample(2, nrow(diabet), prob=c(0.7, 0.3), replace=TRUE)
+diabet_train <- diabet[id==1]
+diabet_test <- diabet[id=2]
+
+diabetes$is_diabetic <- as.factor(Diabetes$is_diabetic)
+
+'find best optmised value of mtry'
+bestmtry <- tuneRF(diabet_train, diabet_train$is_diabetic, stepFactor=1.2, improve=0.01, trace=T, plot=T)
+# it returns the OOB which is the predicted error.
+
+'implement model'
+diabet_forest <- randomForest(is_diabetic~., data=diabet_train)
+diabet_forest
+# returns the number of trees, the number of each split per node and the OOB rate. finally it shows the confusion matrix for classification. from left in the first row NO-NO is the probability of being predicted NO if you are a NO. NO-yes is the prob of being predicted yes if you are a NO. this is a mistake and indeed  the ratio of mistake over overall prediction is also shown as class error.
+
+'which variables are most iporanta for our model according to the gini index'
+imporance(diabet_forest) #or diabet_forest$importance
+varImpPlot(diabet_forest) # they both tells you which are the most important variable for the model
+
+'prediction'
+pred1_diabet <- predict(diabet_forest, newdata=diabet_test, type="class")
+predict1_diabet # shows all the predicted output inside their class
+
+'caret library for confusion matrix'
+library(caret)
+confusionMatrix(table(pred1_diabet, diabet_test$is_diabetic)) #accuracy of the model, confidence interval, information rate, kappa, sensitivity and specificity
+```
+
+```{r random forest statquest}
+library(ggplot2)
+library(cowplot)
+library(randomForest)
+ 
+## NOTE: The data used in this demo comes from the UCI machine learning
+## repository.
+## http://archive.ics.uci.edu/ml/index.php
+## Specifically, this is the heart disease data set.
+## http://archive.ics.uci.edu/ml/datasets/Heart+Disease
+ 
+url <- "http://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.cleveland.data"
+ 
+data <- read.csv(url, header=FALSE)
+ 
+#####################################
+##
+## Reformat the data so that it is
+## 1) Easy to use (add nice column names)
+## 2) Interpreted correctly by randomForest..
+##
+#####################################
+head(data) # you see data, but no column names
+ 
+colnames(data) <- c(
+  "age",
+  "sex",# 0 = female, 1 = male
+  "cp", # chest pain
+          # 1 = typical angina,
+          # 2 = atypical angina,
+          # 3 = non-anginal pain,
+          # 4 = asymptomatic
+  "trestbps", # resting blood pressure (in mm Hg)
+  "chol", # serum cholestoral in mg/dl
+  "fbs",  # fasting blood sugar greater than 120 mg/dl, 1 = TRUE, 0 = FALSE
+  "restecg", # resting electrocardiographic results
+          # 1 = normal
+          # 2 = having ST-T wave abnormality
+          # 3 = showing probable or definite left ventricular hypertrophy
+  "thalach", # maximum heart rate achieved
+  "exang",   # exercise induced angina, 1 = yes, 0 = no
+  "oldpeak", # ST depression induced by exercise relative to rest
+  "slope", # the slope of the peak exercise ST segment
+          # 1 = upsloping
+          # 2 = flat
+          # 3 = downsloping
+  "ca", # number of major vessels (0-3) colored by fluoroscopy
+  "thal", # this is short of thalium heart scan
+          # 3 = normal (no cold spots)
+          # 6 = fixed defect (cold spots during rest and exercise)
+          # 7 = reversible defect (when cold spots only appear during exercise)
+  "hd" # (the predicted attribute) - diagnosis of heart disease
+          # 0 if less than or equal to 50% diameter narrowing
+          # 1 if greater than 50% diameter narrowing
+  )
+ 
+head(data) # now we have data and column names
+ 
+str(data) # this shows that we need to tell R which columns contain factors
+          # it also shows us that there are some missing values. There are "?"s
+          # in the dataset.
+ 
+## First, replace "?"s with NAs.
+data[data == "?"] <- NA
+ 
+## Now add factors for variables that are factors and clean up the factors
+## that had missing data...
+data[data$sex == 0,]$sex <- "F"
+data[data$sex == 1,]$sex <- "M"
+data$sex <- as.factor(data$sex)
+ 
+data$cp <- as.factor(data$cp)
+data$fbs <- as.factor(data$fbs)
+data$restecg <- as.factor(data$restecg)
+data$exang <- as.factor(data$exang)
+data$slope <- as.factor(data$slope)
+ 
+data$ca <- as.integer(data$ca) # since this column had "?"s in it (which
+                               # we have since converted to NAs) R thinks that
+                               # the levels for the factor are strings, but
+                               # we know they are integers, so we'll first
+                               # convert the strings to integiers...
+data$ca <- as.factor(data$ca)  # ...then convert the integers to factor levels
+ 
+data$thal <- as.integer(data$thal) # "thal" also had "?"s in it.
+data$thal <- as.factor(data$thal)
+ 
+## This next line replaces 0 and 1 with "Healthy" and "Unhealthy"
+data$hd <- ifelse(test=data$hd == 0, yes="Healthy", no="Unhealthy")
+data$hd <- as.factor(data$hd) # Now convert to a factor
+ 
+str(data) ## this shows that the correct columns are factors and we've replaced
+  ## "?"s with NAs because "?" no longer appears in the list of factors
+  ## for "ca" and "thal"
+ 
+#####################################
+##
+## Now we are ready to build a random forest.
+##
+#####################################
+set.seed(42)
+ 
+## NOTE: For most machine learning methods, you need to divide the data
+## manually into a "training" set and a "test" set. This allows you to train
+## the method using the training data, and then test it on data it was not
+## originally trained on.
+##
+## In contrast, Random Forests split the data into "training" and "test" sets
+## for you. This is because Random Forests use bootstrapped
+## data, and thus, not every sample is used to build every tree. The
+## "training" dataset is the bootstrapped data and the "test" dataset is
+## the remaining samples. The remaining samples are called
+## the "Out-Of-Bag" (OOB) data.
+ 
+## impute any missing values in the training set using proximities
+data.imputed <- rfImpute(hd ~ ., data = data, iter=6)
+## NOTE: iter = the number of iterations to run. Breiman says 4 to 6 iterations
+## is usually good enough. With this dataset, when we set iter=6, OOB-error
+## bounces around between 17% and 18%. When we set iter=20,
+# set.seed(42)
+# data.imputed <- rfImpute(hd ~ ., data = data, iter=20)
+## we get values a little better and a little worse, so doing more
+## iterations doesn't improve the situation.
+##
+## NOTE: If you really want to micromanage how rfImpute(),
+## you can change the number of trees it makes (the default is 300) and the
+## number of variables that it will consider at each step.
+ 
+## Now we are ready to build a random forest.
+ 
+## NOTE: If the thing we're trying to predict (in this case it is
+## whether or not someone has heart disease) is a continuous number
+## (i.e. "weight" or "height"), then by default, randomForest() will set
+## "mtry", the number of variables to consider at each step,
+## to the total number of variables divided by 3 (rounded down), or to 1
+## (if the division results in a value less than 1).
+## If the thing we're trying to predict is a "factor" (i.e. either "yes/no"
+## or "ranked"), then randomForest() will set mtry to
+## the square root of the number of variables (rounded down to the next
+## integer value).
+ 
+## In this example, "hd", the thing we are trying to predict, is a factor and
+## there are 13 variables. So by default, randomForest() will set
+## mtry = sqrt(13) = 3.6 rounded down = 3
+## Also, by default random forest generates 500 trees (NOTE: rfImpute() only
+## generates 300 tress by default)
+model <- randomForest(hd ~ ., data=data.imputed, proximity=TRUE)
+ 
+## RandomForest returns all kinds of things
+model # gives us an overview of the call, along with...
+      # 1) The OOB error rate for the forest with ntree trees.
+      #    In this case ntree=500 by default
+      # 2) The confusion matrix for the forest with ntree trees.
+      #    The confusion matrix is laid out like this:
+#
+#                Healthy                      Unhealthy
+#          --------------------------------------------------------------
+# Healthy  | Number of healthy people   | Number of healthy people      |
+#          | correctly called "healthy" | incorectly called "unhealthy" |
+#          | by the forest.             | by the forest                 |
+#          --------------------------------------------------------------
+# Unhealthy| Number of unhealthy people | Number of unhealthy peole     |
+#          | incorrectly called         | correctly called "unhealthy"  |
+#          | "healthy" by the forest    | by the forest                 |
+#          --------------------------------------------------------------
+ 
+## Now check to see if the random forest is actually big enough...
+## Up to a point, the more trees in the forest, the better. You can tell when
+## you've made enough when the OOB no longer improves.
+oob.error.data <- data.frame(
+  Trees=rep(1:nrow(model$err.rate), times=3),
+  Type=rep(c("OOB", "Healthy", "Unhealthy"), each=nrow(model$err.rate)),
+  Error=c(model$err.rate[,"OOB"],
+    model$err.rate[,"Healthy"],
+    model$err.rate[,"Unhealthy"]))
+ 
+ggplot(data=oob.error.data, aes(x=Trees, y=Error)) +
+  geom_line(aes(color=Type))
+# ggsave("oob_error_rate_500_trees.pdf")
+ 
+## Blue line = The error rate specifically for calling "Unheathly" patients that
+## are OOB.
+##
+## Green line = The overall OOB error rate.
+##
+## Red line = The error rate specifically for calling "Healthy" patients
+## that are OOB.
+ 
+## NOTE: After building a random forest with 500 tress, the graph does not make
+## it clear that the OOB-error has settled on a value or, if we added more
+## trees, it would continue to decrease.
+## So we do the whole thing again, but this time add more trees.
+ 
+model <- randomForest(hd ~ ., data=data.imputed, ntree=1000, proximity=TRUE)
+model
+ 
+oob.error.data <- data.frame(
+  Trees=rep(1:nrow(model$err.rate), times=3),
+  Type=rep(c("OOB", "Healthy", "Unhealthy"), each=nrow(model$err.rate)),
+  Error=c(model$err.rate[,"OOB"],
+    model$err.rate[,"Healthy"],
+    model$err.rate[,"Unhealthy"]))
+ 
+ggplot(data=oob.error.data, aes(x=Trees, y=Error)) +
+  geom_line(aes(color=Type))
+# ggsave("oob_error_rate_1000_trees.pdf")
+ 
+## After building a random forest with 1,000 trees, we get the same OOB-error
+## 16.5% and we can see convergence in the graph. So we could have gotten
+## away with only 500 trees, but we wouldn't have been sure that number
+## was enough.
+ 
+## If we want to compare this random forest to others with different values for
+## mtry (to control how many variables are considered at each step)...
+oob.values <- vector(length=10)
+for(i in 1:10) {
+  temp.model <- randomForest(hd ~ ., data=data.imputed, mtry=i, ntree=1000)
+  oob.values[i] <- temp.model$err.rate[nrow(temp.model$err.rate),1]
+}
+oob.values
+## [1] 0.1716172 0.1716172 0.1617162 0.1848185 0.1749175 0.1947195 0.1815182
+## [8] 0.2013201 0.1881188 0.1947195
+## The lowest value is when mtry=3, so the default setting was the best.
+ 
+## Now let's create an MDS-plot to show how the samples are related to each
+## other.
+##
+## Start by converting the proximity matrix into a distance matrix.
+distance.matrix <- dist(1-model$proximity)
+ 
+mds.stuff <- cmdscale(distance.matrix, eig=TRUE, x.ret=TRUE)
+ 
+## calculate the percentage of variation that each MDS axis accounts for...
+mds.var.per <- round(mds.stuff$eig/sum(mds.stuff$eig)*100, 1)
+ 
+## now make a fancy looking plot that shows the MDS axes and the variation:
+mds.values <- mds.stuff$points
+mds.data <- data.frame(Sample=rownames(mds.values),
+  X=mds.values[,1],
+  Y=mds.values[,2],
+  Status=data.imputed$hd)
+ 
+ggplot(data=mds.data, aes(x=X, y=Y, label=Sample)) +
+  geom_text(aes(color=Status)) +
+  theme_bw() +
+  xlab(paste("MDS1 - ", mds.var.per[1], "%", sep="")) +
+  ylab(paste("MDS2 - ", mds.var.per[2], "%", sep="")) +
+  ggtitle("MDS plot using (1 - Random Forest Proximities)")
+```
+
+
+
+
+
+--- Boosting with GBM ---
+  1. what is boosting: in bagging the samples are drawn independently. in boosting the trees are grown sequentially, meaning that each tree tries to predict the error left over by the previous tree. It combines several weak and slow learners that combined form a strong learner: improve accuracy.
+  2. what is stochastic gradient boosting. If we randomly draw the dataset, the boosting is called stochastic gradient boosting (GBM algo)
+  3. why it work and advantages
+  4. implement and tuning
+  
+```{r Boosting}
+library(caret)
+library(doMC)
+registerDoMC(cores = 4)
+
+'Load the data and create training and test samples'
+data(Glass, package = "mlbench") # we predict the type of glass
+# Glass <- read.csv("https://goo.gl/sdIBpS")
+Glass$Type <- make.names(Glass$Type)
+set.seed(100)
+trainRows <- createDataPartition(Glass$Type, p=.7,list=FALSE)
+trainData <- Glass[trainRows, ]
+testData  <- Glass[-trainRows, ]
+
+
+modelLookup('gbm') # parameters to be tuned: 
+# 1. "n.trees"=number of trees; 2. "interaction.depth"=how weak the classifier is ; 3. "shrinkage"= how much the prediction of the tree should be shrinked; "m.minobsinnode"=min obs a node can have
+
+trainControl <- trainControl(method="repeatedcv", 
+                             number=10, repeats=3, classProbs=T)
+metric <- "ROC"
+
+'Stochastic Gradient Boosting with GBM'
+set.seed(100)
+
+gbmGrid <- expand.grid(interaction.depth = c(1,2), 
+                       n.trees = seq(100, 1000, by =400),
+                       shrinkage = c(0.01, 0.1), 
+                       n.minobsinnode=c(10, 30, 50))
+
+gbmFit <- train(Type ~ ., data=trainData, 
+                method="gbm", 
+                metric="Accuracy",
+                trControl=trainControl, 
+                tuneGrid=gbmGrid, 
+                verbose=FALSE)
+
+pred <- predict(gbmFit, testData)
+
+caret::confusionMatrix(pred, testData$Type) #77%accuracy from confusion amtrix
+
+'Boosting Regression Tree (Continuous Y Variable)--------------'
+
+data(Sacramento, package="caret")
+# Sacramento <- read.csv("https://goo.gl/IKvmtC") 
+set.seed(100)
+trainRows <- createDataPartition(Sacramento$price, p=.7,list=FALSE)
+trainData <- Sacramento[trainRows, ]
+testData  <- Sacramento[-trainRows, ]
+
+trainControl <- trainControl(method="repeatedcv", 
+                             number=10, repeats=3, classProbs=F) # class pro set to false because it's continuos variable
+
+'Stochastic Gradient Boosting with GBM'
+set.seed(100)
+gbmGrid <- expand.grid(interaction.depth = c(1,2,3), 
+                       n.trees = seq(100, 1000, by =400),
+                       shrinkage = c(0.01, 0.1, .2), 
+                       n.minobsinnode=c(5, 10, 20))
+
+gbmFit <- train(price ~ ., data=trainData, 
+                method="gbm", 
+                metric="RMSE",
+                trControl=trainControl, 
+                tuneGrid=gbmGrid, 
+                verbose=FALSE)
+# see MAPE as valuation of performance beacuse it's a percentage 0-1
+
+varImp(gbmFit)
+
+pred <- predict(gbmFit, testData)
+
+DMwR::regr.eval(testData$price, pred)
+
+
+
+
+'challenge: predict class from segmentationdata from caret paackage using GBM'
+source("https://goo.gl/ZniFaV")
+trainControl <- trainControl(method="repeatedcv", 
+                             number=10, repeats=3, classProbs=T)
+metric <- "ROC"
+
+# Stochastic Gradient Boosting with GBM
+set.seed(100)
+
+gbmGrid <- expand.grid(interaction.depth = c(1,2), 
+                       n.trees = seq(100, 1000, by =400),
+                       shrinkage = c(0.01, 0.1), 
+                       n.minobsinnode=c(10, 30, 50))
+
+gbmFit <- train(Class ~ ., data=trainData, 
+                method="gbm", metric="Accuracy",
+                trControl=trainControl, 
+                tuneGrid=gbmGrid, verbose=FALSE)
+
+pred <- predict(gbmFit, testData)
+
+caret::confusionMatrix(pred, testData$Class, positive="WS") 
+```
+
+--- Regulatization: Ridge and Lasso Regression ---
+  1. penalized regression models: ridge and lasso regressions. add a lambda as regularization parameter that allow parameters to be biased. 
+  2. difference between ridge and lasso: ridge retains all regression because if shrink paraters to very small variables if neeeded; lasso can remove unimportant parameters. lasso solve multicollinearity. alpha=0 is ridged; alpha=1 is lasso.
+  3. iplementation and tuning in R
+  4. Elasticnet
+  5. Challenge
+  
+```{r Regulatization}
+# Setup
+library(glmnet)
+library(caret)
+options(scipen=999)
+'%ni%' <- Negate('%in%')
+
+'Create training and test Data'
+prostate <- read.csv("https://goo.gl/qmrDcY")
+set.seed(100)
+trainRows <- createDataPartition(prostate$lpsa,p=.7,list=FALSE)
+trainData <- prostate[trainRows, ]
+testData  <- prostate[-trainRows, ]
+
+#explicitly set x and y
+train_x <- as.matrix(trainData[, colnames(trainData) %ni% "lpsa"])
+train_y <- as.matrix(trainData[, "lpsa"])
+
+test_x <- as.matrix(testData[, colnames(trainData) %ni% "lpsa"])
+test_y <- as.matrix(testData[, "lpsa"])
+
+'Step 1: find lambda ridged'
+grid=10^seq(10,-2,length=100)
+grid
+
+'Step 2: build glmnet model with lambda=grid and alpha=0'
+ridgeMod = glmnet(train_x, train_y, alpha=0, #ridge regression
+                  lambda=grid, thresh =1e-12)
+ridgeMod
+
+'Step 3: what is the best lambda value? cv.glmmnet function'
+set.seed(100)
+cv.out=cv.glmnet(train_x, train_y, alpha=0)
+plot(cv.out) # on top u have the number of predictors (since is a ridge u have them all); when x=2 is 100 because is in log scale. there are 2 dashed lines. the first is the lambda with lowest MSE and the second is highest deviance.
+bestlam=cv.out$lambda.min
+bestlam
+log(bestlam)
+
+'Step 4: use bestlam'
+pred <- predict(ridgeMod, s=bestlam, newx=test_x)
+DMwR::regr.eval(test_y, pred) # mape=33.5%
+
+'plot value of coefficients against log lambda'
+coefs_ridge <- predict(ridgeMod, type="coefficients", s=bestlam)
+coefs_ridge
+plot(ridgeMod, xvar="lambda") # as labda increase the coeff shrinks, but noone of them is zero untill lambda is very big. each colored line is a coefficient of regressors.
+
+'Lasso implementation'
+set.seed(100)
+lassoMod = glmnet(train_x, train_y, alpha=1, lambda=grid, 
+                  thresh =1e-12)
+cv.out=cv.glmnet(train_x, train_y, alpha=1)
+plot(cv.out)
+bestlam=cv.out$lambda.min
+bestlam
+
+'Predict'
+pred <- predict(lassoMod, s=bestlam, newx=test_x)
+DMwR::regr.eval(test_y, pred)
+
+'Examine coefficients and plot'
+coefs_lasso <- predict(lassoMod, type="coefficients", s=bestlam)
+coefs_lasso
+plot(lassoMod, xvar="lambda")
+
+
+'Challenge'
+# Setup
+library(glmnet)
+library(caret)
+options(scipen=999)
+'%ni%' <- Negate('%in%')
+
+# Create training and test Data
+data("prostate", package="ElemStatLearn")
+# prostate <- read.csv("https://goo.gl/qmrDcY")
+set.seed(100)
+trainRows <- createDataPartition(prostate$lpsa,p=.7,list=FALSE)
+trainData <- prostate[trainRows, ]
+testData  <- prostate[-trainRows, ]
+
+train_x <- as.matrix(trainData[, colnames(trainData) %ni% "lpsa"])
+train_y <- as.matrix(trainData[, "lpsa"])
+test_x <- as.matrix(testData[, colnames(trainData) %ni% "lpsa"])
+test_y <- as.matrix(testData[, "lpsa"])
+
+alphas <- seq(0,1,by=0.01)
+alphas
+
+set.seed(100)
+foldid <- sample(1:10,size=length(train_y),replace=TRUE)  # define the foldsid
+grid <- 10^seq(10,-2,length=100)
+mapes <-numeric(length(alphas))  # initialize output
+i = 1  # loop counter.
+for(a in alphas){
+  bestlam <- cv.glmnet(train_x, train_y, alpha=a, lambda=grid, 
+                       foldid = foldid)$lambda.min  # get best lambda for given alpha 'a'.
+  
+  enetMod <- glmnet(train_x, train_y, alpha=a, lambda=bestlam)  # fit glmnet model
+  
+  pred <- predict(enetMod, s=bestlam, newx=test_x)  # predict
+  
+  mapes[i] <- DMwR::regr.eval(test_y, pred)[4]  # get MAPE
+  
+  i = i + 1  # increment loop counter.
+} 
+out <- cbind(alphas, mapes)  # final alphas and best MAPE
+
+# Plot
+plot(out, type="l", col="blue")
+alpha <- out[which.min(out[, 2]), 1]
+mape <- out[which.min(out[, 2]), 2]
+points(x=alpha, y=mape, cex=2, col="red", pch="*")
+alpha
+```
+
+--- XGBoost ---
+  1. use regularization technique (ridge and lasso) on the trees to win kaggles competitions. 10 times faster than GBM.
+  2. three types of boosters: gbtree, gblinear or dart
+  3. explanations for tuning parameters: eta shinkage tree contribution; gamma is the minim loss required to make a split; max_depth is the max tree depth allowed; colsample_bytree is the max col allowed; min-child-weight is the minimum number of instances to be computed.
+  4. XGBoost model by hand
+  5. tuning XGBoost with caret package
+  
+```{r XGBoost}
+'Install XGBoost'
+install.packages("drat", repos="https://cran.rstudio.com")
+drat:::addRepo("dmlc")
+install.packages(c("xgboost", "Ckmeans.1d.dp", "DiagrammeR"), repos="http://dmlc.ml/drat/", type="source")
+# "DiagrammeR" reqd for xgb.plot.tree
+# "Ckmeans.1d.dp" reqd for xgb.plot.importance
+
+
+'Setup'
+library(caret)
+library(xgboost)
+library(Matrix)
+options(scipen=999)
+'%ni%' <- Negate('%in%')
+
+
+############ build model manually
+'Prepare the datasets'
+prostate <- read.csv("https://goo.gl/qmrDcY")
+set.seed(100)
+trainRows <- createDataPartition(prostate$lpsa,p=.7,list=FALSE)
+trainData <- prostate[trainRows, ]
+testData  <- prostate[-trainRows, ]
+
+'creating the matrix for training the model'
+trainData_xg <- xgb.DMatrix(data.matrix(trainData[, colnames(trainData) %ni% 'lpsa']), 
+                            label = as.numeric(trainData$lpsa))#y var
+
+testData_xg <- xgb.DMatrix(data.matrix(testData[, colnames(testData) %ni% 'lpsa']))
+
+watchlist <- list(train = trainData_xg, test = testData_xg) #optional
+
+
+'Define the parameters and cross validate'
+param <- list("objective" = "reg:linear",
+              "eval_metric" = "rmse")
+cv.nround <- 5
+cv.nfold <- 3
+cvMod <- xgb.cv(param=param, data = trainData_xg,
+                nfold = cv.nfold, 
+                nrounds = cv.nround)
+cvMod #report mean and std of model for train and test
+
+'Build the XGBoost model'
+nrounds <- 50
+xgMod <- xgb.train(param=param, data = trainData_xg, 
+                   nrounds=nrounds, booster="gblinear") #for continuos response variables
+
+'Predict'
+pred <- predict(xgMod, testData_xg)
+
+'MAPE'
+DMwR::regr.eval(testData$lpsa, pred) #mape of 33%
+
+###################### we do the same by caret package but doesn't improve the model we manually built
+'using Caret package'
+library(caret)
+library(doMC)
+registerDoMC(cores = 4)
+
+'pack the training control parameters'
+xgb_trcontrol = trainControl(
+  method = "cv",
+  number = 5,
+  verboseIter = TRUE,
+  returnData = FALSE,
+  returnResamp = "all",         # save losses across all models
+  allowParallel = TRUE)
+
+modelLookup('xgbLinear')
+
+
+'Tune the model'
+set.seed(100)
+xgb_train = train(
+  x = as.matrix(trainData[, colnames(trainData) %ni% "lpsa"]),
+  y = trainData$lpsa,
+  trControl = xgb_trcontrol,
+  tuneLength=3,
+  method = "xgbLinear"
+)
+
+'Predict'
+pred <- predict(xgb_train, testData)
+
+'MAPE'
+DMwR::regr.eval(testData$lpsa, pred) #mape 40%
+
+###############################################
+
+
+
+'challenge on predictive the glass'
+# Prepare the datasets
+data(Glass, package = "mlbench")
+# Glass <- read.csv("https://goo.gl/sdIBpS")
+levels(Glass$Type) <- c(0:5)  # proper sequence. Should start from 0.
+Glass$Type <- as.integer(as.character(Glass$Type))  # convert to integer 
+unique(Glass$Type)
+
+set.seed(100)
+trainRows <- createDataPartition(Glass$Type,p=.7,list=FALSE)
+trainData <- Glass[trainRows, ]
+testData  <- Glass[-trainRows, ]
+
+# creating the matrix for training the model
+trainData_xg <- xgb.DMatrix(data.matrix(trainData[, colnames(trainData) %ni% 'Type']), 
+                            label = trainData$Type)
+
+testData_xg <- xgb.DMatrix(data.matrix(testData[, colnames(testData) %ni% 'Type']))
+
+watchlist <- list(train = trainData_xg, test = testData_xg)
+
+# Define the parameters and cross validate
+param <- list("objective" = "multi:softmax",
+              "eval_metric" = "mlogloss",
+              "num_class" = length(unique(trainData$Type)))
+cv.nround <- 5
+cv.nfold <- 3
+cvMod = xgb.cv(param=param, data = trainData_xg, nfold = cv.nfold, 
+               nrounds = cv.nround, watchlist=watchlist)
+
+# Build
+# Build the XGBoost model
+nrounds = 50
+xgMod = xgboost(param=param, data = trainData_xg, nrounds=nrounds, watchlist=watchlist)
+
+# See the XGBoost Model
+model <- xgb.dump(xgMod, with.stats = T)
+model[1:10]
+
+# Feature Importance
+# Feature Importance
+names <- colnames(trainData)[colnames(trainData) %ni% 'lpsa']  # Get the real names
+
+# Compute feature importance matrix
+featureImp <- xgb.importance(names, model = xgMod)
+featureImp
+
+# Nice graph
+xgb.plot.importance(featureImp) #save on webpage
+
+# Plot
+xgb.plot.tree(feature_names=names, 
+              model=xgMod, n_first_tree = 2)
+
+
+# Predict
+pred <- predict(xgMod, testData_xg)
+
+tab <- table(pred, testData$Type)
+caret::confusionMatrix(tab)
+```
+
+
+----------------------
+*SECTION 5: Unsupervised Learning (no response variable needed)*
+----------------------
+**TOPICS: Clustering types:**
+- Dimensionality reduction with Principal Components
+- Clustering with K-means and Principal Components
+- Clusteringtendency and optimum number of clusters
+- Hierarchical Clustering
+- Clustering with Affinity Propagation
+- Building recommendation engines (example)
+
+--- Dimensionality reduction with Principal Components ---
+1. pupouse
+2. how PCA works: reduce the dimensionality of DF by grouping correlated features into smaller groups represented by spacial eigenvectors. It explains the variability, not the response variable.
+3. hot to interpret PC and Biplot
+
+```{r PCA}
+library(MASS)
+data(Boston)
+
+'PCA'
+pca_out <- prcomp(Boston, scale.=T) # prcomp function to do PCA
+boston_pc <- pca_out$x # principal components in matrix x. as many pc as the dimensionalities of DF
+
+summary(pca_out)
+
+'plot info in the summaries'
+plot(pca_out) # who explain more the variability of dataset
+
+par(mar=c(4,4,2,2))
+biplot(pca_out, cex=0.5, cex.axis=0.5) # the red lines that are most close are correlated and we can further group the PC by choosing the optimal amount of PCs in the next topic
+
+'challenge: what percentage of variation is explained by the first 2 pc in mtcars df'
+m_pca <- prcomp(mtcars, scale.=T)
+out <- m_pca$x
+summary(m_pca) #the first 2 PCs explain 84% of variation
+```
+
+
+
+--- Clustering with K-means and Principal Components ---
+1. purpose
+2. how k-works and visualize result: outlier dependent; the cluster may change according to initial point; you have to set the number of clusters
+3. how to implement grouping
+4. how to cluster with principal components
+
+```{r k means clustering}
+library(cluster)
+
+'k means algorithm'
+set.seed(100) # for repeatability
+k_obj <- kmeans(iris[, -5], 3) # remove non numeric variables and set 3 as the number of clusters
+k_obj$cluster # all the point are allocated in one cluster
+
+'plot on principal components as X and Y axis with k=3'
+pcmod <- prcomp(iris[,-5], scale=T)
+pcas <- predict(pcmod)
+plot(pcas[,1], pcas[,2], col=k_obj$cluster)
+text(pcas[,1], pcas[,2], iris$Species, cex=0.5) # unsatisfying because the 3 clusters dont capture the different species
+
+'plot on principal components as X and Y axis with k=2'
+set.seed(100)
+k_obj <- kmeans(iris[, -5], 2)
+k_obj$cluster 
+pcmod <- prcomp(iris[,-5], scale=T)
+pcas <- predict(pcmod)
+plot(pcas[,1], pcas[,2], col=k_obj$cluster)
+text(pcas[,1], pcas[,2], iris$Species, cex=0.5) # the 2 clusters better fit the 2 PCs, but in reality there are 3 groups. how do u choose an optimum number of clusters? next topic.
+
+'challenge: PCA on Iris'
+pcmod <- prcomp(iris[,-5],scale=T) #pca as before
+pcas <- predict(pcmod) # why he does it?
+
+k_pcaobj <- kmeans(pcas,3) # kmeans on pc
+plot(pcas[,1], pcas[,2], col=k_pcaobj$cluster)
+text(pcas[,1], pcas[,2], iris$Species, cex=0.5)
+table(k_pcaobj$cluster, iris$Species)
+
+# pcas identified the number of cluster correctly! is there a way to find the optimum algorithmically? yes, next video
+```
+
+--- Clusteringtendency and optimum number of clusters---
+1. clustering tendency measured by Hopkins Statistic: it measure the prob that a given DF is generated form random datapoint. lower HS, lower the chance that the observations are spread uniformly
+2. how to visualize clustering tendency
+3. find optimum number of clsuter
+-->
+
+```{r tendency}
+
+'hopkins statistic'
+#install.packages("clustertend")
+library(clustertend)
+
+hopkins(iris[,-5], n=(nrow(iris)-1)) # 18% meaning datapoints are not at random
+
+'visualize tendency with dissiplot for a random matrix'
+#install.packages("seriation")
+library(seriation)
+set.seed(100)
+rand_mat <- matrix(runif(1000), nrow=100)
+dissplot(dist(rand_mat), main="Clustering Tendency: dissplot") # in a random matrix no patterns are seen
+
+'visualize tendency with dissiplot for a non random matrix/DF'
+df_dist <- dist(iris[, -5])
+dissplot(df_dist, main="Clustering tendency: dissplot") # there are 2 clear groups and also, within groups, there are smaller group grey areas
+
+'Silhouette Width to select best amount of clusters'
+library(cluster)
+# if there are groups structurally similar this method is not advisable
+data(ruspini)
+x <- ruspini
+avg_sil_wid <- numeric(NROW(x)/2) # initialize output of silhouette width
+
+for(nclus in 2:(nrow(x)/2)){
+  set.seed(100)
+  kout <- kmeans(x, nclus) # run k means
+  ss <- silhouette(kout$cluster, dist(x)) #silhoutte plot
+  avg_sil_wid[nclus] <- mean(ss[,3])
+}
+
+opt_clusters <- which.max(avg_sil_wid) # the k that gives max width is likely to be the best
+opt_clusters # optimum for ruspini DF is 4 clusters
+
+'plot silhoutte result by hand'
+par(mar=c(5,3,2,1))
+plot(1:(NROW(x)/2), avg_sil_wid, type="b", pch=19, frame=T,
+     xlab="Number of clusters k", ylab="AvgSilWid", main="Optimal number of Clusters")
+points(x=opt_clusters, y=max(avg_sil_wid), col="red", pch=21, cex=3)
+abline(v=which.max(avg_sil_wid), lty=2)
+# this is how silhouette varies for the points. also consider clusters below the max
+
+'check that the number of clusters is correct by plotting the dataset colored by the cluster'
+set.seed(100)
+kout <- kmeans(x, 4) # do k mean on ruspini DF (x=ruspini DF)
+kout$cluster # the clusters corresponding to each datapoint
+plot(ruspini, col=kout$cluster)
+
+'challenge: check clustering tendency of ruspinin using Hopkins Statistic and find optimal number of clusters iwth silhouette width'
+library(cluster)
+library(clustertend)
+
+# number 1
+data(ruspini)
+hopkins(ruspini, n=nrow(ruspini)-1) #0.24 not random!
+dissplot(dist(ruspini)) # u see 4 dark shades
+
+# number 2
+x <- faithful
+avg_sil_wid <- numeric(NROW(x)/4) # initialize output of silhouette width
+for(nclus in 2:(nrow(x)/4)){
+  set.seed(100)
+  kout <- kmeans(x, nclus) # run k means
+  ss <- silhouette(kout$cluster, dist(x)) #silhoutte plot
+  avg_sil_wid[nclus] <- mean(ss[,3])
+}
+
+opt_clusters <- which.max(avg_sil_wid) # the k that gives max width is likely to be the best
+s
+par(mar=c(5,3,2,1))
+plot(1:(NROW(x)/4), avg_sil_wid, type="b", pch=19, frame=T,
+     xlab="Number of clusters k", ylab="AvgSilWid", main="Optimal number of Clusters")
+points(x=opt_clusters, y=max(avg_sil_wid), col="red", pch=21, cex=3)
+abline(v=which.max(avg_sil_wid), lty=2)
+
+
+
+```
+
+--- Hierarchical Clustering ---
+  1. how it works
+  2. different types: agglomerative (bottom up) and divisive (top down)
+  3. linkage methods: single link where a single distance between similar items; complete link; average link
+  4. dendrograms
+  
+```{r hierarchical}
+dta <- read.table("https://archive.ics.uci.edu/ml/machine-learning-databases/00236/seeds_dataset.txt",
+                  header=F, fill=T)
+
+colnames(dta) <- c("area",
+                   "perimeter", 
+                   "compactness", 
+                   "length_of_kernel", 
+                   "width_of_kernel", 
+                   "asymmetry_coefficient", 
+                   "length_of_kernel_groove",
+                   "type") 
+
+# seed_types <- "Kama, Rosa and Canadian"
+
+'Hierarchical clustering'
+library(cluster)
+dist_mat <- dist(dta[, -8]) # first always compute distance matrix
+h <- hclust(dist_mat)
+h
+
+'Plot'
+plot(h, cex=0.75, labels = dta$type)
+rect.hclust(h, k = 3, border = 2:4) # underline 3 clusters
+
+pred <- cutree(h, k=3)  # to know the cluster allocation per each row of the dataset
+pred
+
+
+
+"Challenge: do hierarchical clustering on iris dataset and get cluster allocation of each row anc compare with the origianl spe"
+distmat <- dist(iris[, -5])
+clus <- hclust(distmat, method = "ward.D")
+plot(clus)
+rect.hclust(clus, k = 3, border = 2:4)
+
+pred <- cutree(clus, k=3)  # create k clusters
+pred
+table(pred,iris$Species)
+```
+
+
+--- Affinity Propagation ---
+1. general concept: allign points with exemplars
+2. affinity propagation with k clusters. in k means we start with defined clusters, in affinity propagation each point is an exemplars that transmit messages and these exemplars can be the centrum
+3. challenge
+4. references
+```{r affinity propagation}
+#install.packages("apcluster")
+
+library(apcluster)
+dta <- read.table("https://archive.ics.uci.edu/ml/machine-learning-databases/00236/seeds_dataset.txt",
+                  header=F, fill=T)
+
+colnames(dta) <- c("area",
+                   "perimeter", 
+                   "compactness", 
+                   "length_of_kernel", 
+                   "width_of_kernel", 
+                   "asymmetry_coefficient", 
+                   "length_of_kernel_groove",
+                   "type") 
+head(dta) # we have to eliminate last column with the code below
+
+neg_sim_mat<- negDistMat(dta[, -8], r=2) # we used squared distances with "r"
+dim(neg_sim_mat)
+
+"other options"
+#expSimMat(dta[, -8], r=2, w=1, method="euclidean")  # r is the power, w is the radius
+#linSimMat(dta[, -8], w=1, method="euclidean")
+#corSimMat(dta[, -8], r=1, signed=TRUE)
+#linKernel(dta[, -8], normalize=FALSE)
+
+"Run apcluster"
+clus <- apcluster(neg_sim_mat)
+clus
+cl <- clus@clusters  # get the clusters, they are 11
+xmplrs <- clus@exemplars  # exemplars, the centrum of the 11 clusters
+
+"Function to tidy the clusters in a nice dataframe"
+tidy_clus <- function(cl){
+  names(cl) <- paste0("cl", 1:length(cl))  # assign names
+  
+  # function to get the observation and cluster number in a dataframe.
+  getCl <- function(x){
+    data.frame(id=cl[[x]], cluster=rep(x, length(cl[[x]])))
+  }  
+  
+  # get the observation and cluster number
+  groups_list <- lapply(names(cl), getCl) 
+  groups_df <- Reduce(rbind, groups_list)  # row bind the list of dataframes
+  groups <- groups_df[order(groups_df$id), ]  # sort by obs. id.
+  groups
+}
+
+groups <- tidy_clus(cl) # contain cluster number
+
+dta_x <- cbind(dta, groups)  # attach it to original dataset
+head(dta_x)
+
+"Compare"
+t1 <- table(dta_x$type, dta_x$cluster)
+t1
+
+"Merge some clusters"
+clus_agg <- aggExCluster(s=neg_sim_mat, x=clus)
+plot(clus_agg)
+
+clus_agg_4 <- cutree(clus_agg, k=3)
+clus_agg_4
+
+groups2 <- tidy_clus(cl=clus_agg_4@clusters)
+dta_xx <- cbind(dta, groups2)
+t2 <- table(dta_xx$type, dta_xx$cluster)
+t2
+
+"Challenge: use PCs from iris dataset to compute affinity propagation"
+library(apcluster)
+data(iris)
+
+# get the principal components
+pca_iris_mod <- princomp(iris[, -5])  # princpal components model
+screeplot(pca_iris_mod, type="lines")  # scree plot
+pca_iris <- predict(pca_iris_mod)  # compute the prncipal components
+head(pca_iris)
+
+# run AP Cluster for predefined K clusters.
+iris_clus <- apclusterK(negDistMat(r=2), pca_iris[, 1:2], K=3, prc=0) # we have 4 pcs but we force the clusters to be 3
+cl <- iris_clus@clusters
+xmplrs <- iris_clus@exemplars
+
+grps <- tidy_clus(cl)
+iris_x <- cbind(iris, grps)
+iris_x$Species_abbr <- abbreviate(iris_x$Species, 1)
+head(iris_x)
+
+# plot
+plot(pca_iris[, 1:2], col=iris_x$cluster, pch="*", 
+     main="Iris - AP Cluster")  # draw points
+points(pca_iris[xmplrs, 1], pca_iris[xmplrs, 2], 
+       col=iris_x[xmplrs, "cluster"], cex=1.5)  # mark exemplars
+text(pca_iris[, 1], pca_iris[, 2]-0.1, 
+     labels=iris_x$Species_abbr, cex=0.5,  
+     col=as.numeric(as.factor(iris_x$Species)))  # mark original group.
+```
+
+--- building recommendation engine ---
+  1. inputs recommendation algorithms
+  2. understanding approaches to build recommendations engines
+  3. how to find similar customers
+  4. how to find similar products
+  5. building recommendation engine (UBCF)
+  
+Ratings could be:
+  1. Ratings (real)
+  2. Ratings binary: good/bad; bought/not bought
+  3. Sentiment score (real or binary)
+  4. Quantity of purchased product
+  5. Product webpage was clicked or not (binary)
+  6. number of clicks on a product page
+--> in any case is represented as a matrix with columns (items) and rows (users)
+
+Ratings types available in recommender lab package:
+  1. User Based Collaborative Filtering (UBCF): find users with similar taste and recommend based on historical patterns--> algo used is similar neigbhour
+  2. Item Based Collaborative Filtering (IBCF): done on items rather than users using similar neighbour algo
+  3. Popularity (Popular): for new customers. items most popular among regular users are recommended
+  4. Re-Recommend (RERECOMMEND): we recommend items with high ratings
+  5. Association Rules (AR): recommend items associated like combos
+  6. Random Recommendations (RANDOM): 
+  7. ALS Latend Factors (ALS):
+  8: SVD Approximation with column mean imputation (SVD): deal with large dataset
+```{r building recommendation engines}
+"Import"
+ratingsDf <- read.csv("https://goo.gl/HyQcAX")
+ratingsMat <- as.matrix(ratingsDf) # visualize faster than if it were a DF
+View(ratingsMat)
+
+#install.packages("recommenderlab")
+library(recommenderlab)
+ratings <- as(ratingsMat, "realRatingMatrix") # contains matrix for all users. find cosin similarities alter
+ratings
+class(ratings)
+
+'method available: "cosine", "pearson", "jaccard". we recommend highest rated item to new users'
+usr_sim <- recommenderlab::similarity(ratings[1:10, ], method="cosine", which="users")  
+class(usr_sim)
+
+usr_sim[is.na(usr_sim)] <- 0  # replace NA with 0's
+usr_sim <- round(usr_sim, 2)  # round off
+plot(hclust(usr_sim))
+
+"Find similar items based on user preferences"
+item_sim <- recommenderlab::similarity(ratings[, 1:15], method="cosine", 
+                                       which="items")
+item_sim[is.na(item_sim)] <- 0  # replace NAs
+item_sim <- round(item_sim, 2)  # round off
+plot(hclust(item_sim))
+
+
+"all Methods available that i listed in the text before coding"
+recommenderRegistry$get_entries()
+
+
+"Methods for realRatingMatrix"
+recommender_models <- recommenderRegistry$get_entries(dataType = "realRatingMatrix")
+recommender_models
+names(recommender_models) # we have 9 methods, but we are going to use "UBCF" method
+recommender_models$UBCF_realRatingMatrix # what we need to input
+recommender_models$UBCF_realRatingMatrix$parameters 
+
+'ACTUAL MODEL'
+"splitting the data Training and Test"
+set.seed(100)
+train_rows <- sample(1:nrow(ratings), size=0.9*nrow(ratings), replace = F)
+ratings_train <- ratings[train_rows, ]
+ratings_test <- ratings[-train_rows, ]
+
+rec_model <- Recommender(data = ratings_train, method = "UBCF")  # build the UBCF
+rec_model
+getModel(rec_model)  # get the model specifications as a list
+
+"test"
+n_reco <- 15
+recommendations <- predict(object = rec_model, newdata = ratings_test, n = n_reco)
+recommendations
+
+recommendations@ratings
+recommendations@items
+recommendations@itemLabels
+
+reco_out <- as(recommendations, "list") # get number recommendaed movies per users
+reco_out
+
+"smaller set"
+top3 <- bestN(recommendations, 3) # top 3 recommendation per user
+top3
+as(top3, "list")
+
+############################################
+"challenge: recommend 5 popular movies for each user and 5 movies based on historic purchase patterns of other users based on association rules"
+# Import
+ratingsDf <- read.csv("https://goo.gl/HyQcAX")
+ratingsMat <- as.matrix(ratingsDf)
+
+# install.packages("recommenderlab")
+library(recommenderlab)
+ratings <- as(ratingsMat, "realRatingMatrix")
+class(ratings)
+
+"prepare training and test datasets"
+set.seed(100)
+train_rows <- sample(1:nrow(ratings), size=0.9*nrow(ratings), replace = F)
+ratings_train <- ratings[train_rows, ]
+ratings_test <- ratings[-train_rows, ]
+
+"POPULAR MODEL"
+"model"
+rec_model_POPULAR <- Recommender(data = ratings_train, method = "POPULAR")  # build the UBCF
+rec_model_POPULAR
+
+"predict popular movies"
+n_reco <- 5
+recommendations <- predict(object = rec_model_POPULAR, 
+                           newdata = ratings_test, n = n_reco)
+recommendations
+as(recommendations, "list")
+
+
+"ASSOCIATIVE MODEL MINING"
+"Binarize the ratings with minimum rating of 3 to be positive"
+ratings_bin <- binarize(ratings, minRating=3)
+
+"Create training and test samples."
+set.seed(100)
+train_rows <- sample(1:nrow(ratings_bin), size=0.9*nrow(ratings_bin), replace = F)
+ratings_train <- ratings_bin[train_rows, ]
+ratings_test <- ratings_bin[-train_rows, ]
+
+"Check AR model parameters"
+recommender_models <- recommenderRegistry$get_entries(dataType="binaryRatingMatrix")
+recommender_models$AR_binaryRatingMatrix$parameters
+
+"Recommender model"
+rec_model_AR <- Recommender(data = ratings_train, method = "AR", parameter=list(maxlen=5))  # build the UBCF
+rec_model_AR
+
+"Predict"
+recommendations <- predict(object = rec_model_AR, newdata = ratings_test, n = n_reco)
+recommendations
+
+as(recommendations, "list")
+```
+
+----------------------
+*SECTION 6: Time series*
+----------------------
+In section 6:
+  1. Understanding coponents of TS and xts package
+  2. Stationarity, detrend and deseasonalize
+  3. Lags, ACF, PACF, CCF
+  4. MA and exp smoothing
+  5. Double exponential smoothing and Holt Winters
+  6. ARIMA modelling
+
+In this video: 
+  1. what is a TS
+  2. How to create ts of different freq
+  3. XTS package
+  4. types of TS
+  5. components
+  6. decompose and extract components
+```{r components of TS}
+set.seed(100)
+vec<- round(runif(100, 1,10), 2)
+
+'create ts of different freq USING TS'
+# frequency 4 => Quarterly Data. start fx takes year and month number
+q_ts<- ts(vec, frequency = 4, start = c(1959, 2)) 
+# freq 12 => Monthly data. 
+m_ts<- ts(vec, frequency = 12, start = 1990)
+# Yearly Data
+y_ts<- ts(vec, frequency=1, start=c(2009)) 
+# Daily --> so bad! see next function for daily frequency
+d_ts <- ts(vec, frequency=365.25, start=c(2009, 10)) 
+d_ts
+plot(d_ts)
+
+'USE xts daily FOR DAILY OBJECTS!'
+library(xts)
+d_xts <- xts(vec, as.Date("2009-10-01")+0:99)
+plot(d_xts)
+
+set.seed(100)
+vec1 <- sample(1:100) 
+vec2 <- round(vec1 + runif(100, 10, 20))
+
+library(lubridate)
+dates <- seq.Date(ymd("2009-10-01"), length.out = 100, by="day")
+# dates2 <- seq.Date(as.Date("2009-10-01"), length.out = 100, by="day")
+# dates3 <- seq.Date(anytime::anydate("2009-10-01"), length.out = 100, by="day")
+
+'create df'
+df<- data.frame(vec1, vec2)
+rownames(df) <- as.character(dates)
+df
+df_xts<- as.xts(df)
+plot(df_xts$vec1, main="Plot from XTS obj")
+lines(df_xts$vec2)
+
+'Filtering dates'
+df_xts["2009"]  # get all data for 2009
+df_xts["2009-10/"]  # get all data from 2009-10 to end
+df_xts["/2009-10"]  # get all data till start to 2009-10
+
+'for stocks prices'
+to.monthly(df_xts)
+to.weekly(df_xts)
+to.quarterly(df_xts)
+to.yearly(df_xts)
+
+'Decompose'
+decomposedRes<- decompose(m_ts, type="mult") # use type = "additive" for additive components
+decomposedRes1<- decompose(m_ts, type="additive")
+
+plot(decomposedRes)
+plot(decomposedRes1)
+
+stlRes<- stl(m_ts, s.window = "periodic", robust = T)
+stlRes
+stlRes$time.series
+
+'Challenge'
+jj <- as.xts(JohnsonJohnson)
+to.yearly(jj)
+```
+
+video 6.2
+  1. stationary
+  2. detrending
+  3. deseasonalize
+  4. Challenge
+```{r stationarity and detrend}
+'Augmented Dickey Fuller Test (ADF Test)'
+library(tseries)
+set.seed(100)
+x <- runif(1000)  # random noise
+plot(x)  # plot the random noise
+adf.test(x)  # check if stationary.
+
+adf.test(JohnsonJohnson) # not stationary
+plot(JohnsonJohnson)
+
+'Concept of differencing'
+library(forecast)
+x <- AirPassengers
+
+'Seasonal differencing affecting the trend'
+ns <- nsdiffs(x)
+ns
+if(ns > 0) {
+  de_seas<- diff(x,lag=frequency(x),differences=ns)
+} else {
+  de_seas <- x
+} # it says 1 sasonal differencing is required
+
+plot(de_seas)
+
+'regular differencing'
+n <- ndiffs(de_seas)
+if(n > 0) {
+  differenced <- diff(de_seas, differences=n)
+}
+plot(differenced)
+
+
+'stl decomposition'
+library(forecast)
+ts.stl<- stl(AirPassengers,"periodic")  # decompose the TS
+
+'de-trendING BEST METHOD BY REMOVING TREND FROM STL- method 1'
+de_seas<- AirPassengers - ts.stl$time.series[, 1]
+plot(de_seas, type='l', main="De-Seasonalize")
+
+'de-SEASONALIZE BEST METHOD BY REMOVING SEAS FROM STL- method 1'
+de_trend<- AirPassengers - ts.stl$time.series[, 2]
+plot(de_trend, type='l', main="De-Trend")
+
+'de-seasonalize - method 2'
+ts.sa <- forecast::seasadj(ts.stl)  
+plot(ts.sa, type="l")  # seasonal adjusted
+
+'de-trend FROM LINEAR MODEL- method 2'
+trModel<- lm(AirPassengers ~ c(1:length(AirPassengers)))
+de_trend2 <- resid(trModel)
+plot(de_trend2, type="l")  # resid(trModel) contains the de-trended series.
+
+'Answer: DETRENDING johnson data'
+library(forecast)
+ts.stl<- stl(JohnsonJohnson,"periodic")  # decompose the TS
+de_trend<- JohnsonJohnson - ts.stl$time.series[, 2]
+plot(de_trend, type='l', main="JohnsonJohnson De-Trended")
+```
+
+Part 3: Lags/Leads, ACF, PACF and cross correlation
+```{r lgas}
+'lag and leads using dplyr'
+AirPassengers
+ap_lag1 <- dplyr::lag(AirPassengers, n=1)
+ap_lag1
+
+ap_lead1 <- dplyr::lead(AirPassengers, n=1)
+ap_lead1
+# lags are importnat because for s TS an obs can be dependent on the previous one
+
+'ACF'
+library(forecast)
+acfRes<- Acf(AirPassengers) # autocorrelation
+
+# Acf of stationary series
+set.seed(100)
+x <- runif(100)
+Acf(x)
+
+'PACF'
+pacfRes<- Pacf(AirPassengers)  # partial autocorrelation
+
+'CCF correlation between two different tiem series'
+ccfRes<- ccf(mdeaths, fdeaths, ylab = "cross-correlation") # computes cross correlation between 2 timeseries.
+
+'challenge: up to which lag the lags are correlated'
+forecast::Acf(JohnsonJohnson, 25)
+```
+
+Forecasting with MA and expSmoothing
+```{r MA and expo Smoothing}
+"Moving Average"
+library(forecast)
+out <- ma(AirPassengers, 5)
+plot(AirPassengers)
+lines(out, col="red")
+
+'Exponential Smoothing'
+out <- ses(AirPassengers, initial="simple", alpha=0.3, h=2)  # alpha =0.3
+out
+
+out1 <- ses(AirPassengers, initial="simple", alpha=0.5, h=2)  # alpha = 0.5
+plot(window(AirPassengers, start=1956), xlim=c(1956, 1962), 
+     main="AirPassengers", type="o")
+lines(out$mean, col="red", type="o")
+lines(out1$mean, col="blue", type="o")
+
+
+out <- ses(AirPassengers, initial="simple", h=2)  # alpha estimated by `ses`
+summary(out)
+```
+
+Forecast with Double exSmoothing and Holt Winter
+HOLT EXPONENTIAL SMOOTHING
+$\Y_{i+1}=E_{i}+T_{i}$ where $E_{i}=\alpha Y_{i}+(1- \alpha)(E_{i-1}+T_{i-1})$ and $T_{i}=\beta(E_{i}-E_{i-1})+(1-\beta)T_{i-1})$
+
+HOLT WINTER EXPONENTIAL SMOOTHING
+$\Y_{i+1}=(E_{i}+T_{i})*S_{(i+1)-c}$ where $E_{i}=\alpha Y_{i}/S_{i-c}+(1- \alpha)(E_{i-1}+T_{i-1})$ , $T_{i}=\beta(E_{i}-E_{i-1})+(1-\beta)T_{i-1})$ and finally $S_{i}=\Gamma(Y_{i}/E_{i-1})+(1-\Gamma)S_{i-c}$
+```{r smoothing and HW}
+'Double Exponential Smoothing (Or just holt) using holt function'
+library(forecast)
+data("ausair", package="fpp")
+# "https://github.com/selva86/datasets/blob/master/ausair.RDS"
+# exponential smoothing sucks when there is a trend, the hold and hold winter apply a smoothing on both; HW also on the seasonality.
+
+# method 1: 
+hfit1 <- holt(ausair, initial="simple")
+summary(hfit1) # shows error matrix measures and alpha, beta parameters
+
+# method 2
+hfit2 <- holt(ausair, initial="simple", exponential = T)
+summary(hfit2)
+
+#  method 3
+hfit3 <- holt(ausair, damped = T)
+summary(hfit3)
+
+
+plot(ausair, main="Air Passengers - Australia", type="o", xlim=c(1970, 2019), 
+     ylim=c(0, 70))
+lines(fitted(hfit1), col="red", lty=2)  # holt fitted
+lines(fitted(hfit2), col="green", lty=2)  # exponential fitted
+lines(fitted(hfit3), col="blue", lty=2)  # damped fitted
+lines(hfit1$mean, col="red", type="o")  # holt forecast
+lines(hfit2$mean, col="green", type="o")  # exponential forecast
+lines(hfit3$mean, col="blue", type="o")  # damped forecast
+
+
+'Holtwinters: find alpha beta and gamma automatically'
+hw_fit1 <- hw(JohnsonJohnson, seasonal="additive")
+hw_fit2 <- hw(JohnsonJohnson, seasonal="multiplicative")
+summary(hw_fit1)
+
+# plot
+plot(JohnsonJohnson, type="o", xlim=c(1960, 1983), ylim=c(0, 20), 
+     main="JohnsonJohnson")
+lines(fitted(hw_fit1), col="blue", lty=2)  # damped fitted
+lines(fitted(hw_fit2), col="red", lty=2)  # damped fitted
+lines(hw_fit1$mean, col="blue", type="o")  # holt forecast
+lines(hw_fit2$mean, col="red", type="o")  # holt forecast
+
+
+"Challenge using window function"
+train <- window(AirPassengers, start=c(1949,1), end=c(1958, 12))
+test <- window(AirPassengers, start=c(1959,1), end=c(1960, 12))
+
+fit <- hw(train, seasonal = "additive")
+predicted <- forecast(fit, h=24)$mean
+accuracy(predicted, test)
+```
+
+---FORECAST WITH ARIMA: autoregressive integrated moving average---
+
+```{r arima}
+"Auto.Arima: p i q"
+# prepare training and test by windows function
+train <- window(JohnsonJohnson, start=c(1960), end=c(1975))
+test <- window(JohnsonJohnson, start=c(1976), end=c(1980))
+fit <- auto.arima(train)  # auto.arima model
+fit
+
+# forecast
+predicted <- forecast(fit, h=20)$mean
+accuracy(predicted, test) #mse, rmse etc
+
+"Xreg for external regressors"
+# auto arima with external regressors
+fit <- auto.arima(train, xreg = fourier(train, 2))#furier imitate seasonal pattern of time series
+predicted <- forecast(fit, h=20, xreg=fourier(train, 2, 20))$mean
+accuracy(predicted, test)  # calc accuracy
+
+"Challenge"
+fit <- auto.arima(train, xreg = seasonaldummy(train))
+predicted <- forecast(fit, h=20, xreg=seasonaldummy(train, 20))$mean
+accuracy(predicted, test)
+```
+
+----------------------
+*SECTION 7: Web scraping*
+----------------------
+  1.scraping webpages and processing texts: just an intro
+  2. corpus, tdm, tf-idf, word cloud: just an intro
+  3. cosine similarity and latent semantic analysis: understand by dont run
+  4. extracting topics with latent dirichlet allocation: USEFUL
+  5. sentiment scoring with tidytext and syuzhet: USEFUL 
+  6. classifying texts with RTextTools: USEFUL
+
+---scraping webpages and processing texts---
+  1. reading text files
+  2. understanding structure of any HTML web page: RIGHT CLICK AND "PAGE SOURCE". The head tag has info about the page, metadata, style info and so on. The body tag contains what u see in the screen (paragragh, dips, list , images and edings). you can read the source using readLine but could be messy. To help reading just specific parts, try with rvest package.
+  3. fetching CSS selector/ Xpath of any HTML node/object
+  4. web scarping with rvest
+  
+```{r Web scraping 1}
+'Import text file'
+text = readLines("https://raw.githubusercontent.com/selva86/datasets/master/yoga.txt") # readLines function
+length(text)  # 10 lines
+text[1:5] # each line stores a character vector
+
+'Use `rvest` to scrape particular portions of webpage. ---------------'
+#install.packages("rvest")
+library(rvest) 
+
+# this read the whole document.
+page <- read_html("https://cran.r-project.org/web/packages/rvest/vignettes/selectorgadget.html")
+page
+# how do you extract a particular node (node=tag in the html file)?
+# each node has a unique path. Use selector or Xpath to specify them.
+# how do u get the selector? ricghtclick on the webpage and inspect the element. As you move in the source code, the respective element in the page is highlighted. When the right click is highlithed, right click in the source and "copy"-> "selector" or copy "Xpath" if u want that.
+
+selector <- "#use > ol:nth-child(3) > li:nth-child(3) > p"  # css selector
+
+'Now that we have the page object as xtml document. How do we read it? Extract portion that selector points to (here we use pype sintax)'
+library(dplyr)
+# take page object, take a specific node we selected before and read it
+txt <- page %>% html_node(css=selector) %>% html_text()
+txt
+# alternatively, in two lines, we can write it like this
+node1 <- html_node(page, css=selector)
+txt <- html_text(node1)
+'alternatively to the selector method: using xpath'
+xpath <- '//*[@id="use"]/ol[1]/li[3]/p'
+txt <- page %>% html_node(xpath=xpath) %>% html_text()
+txt
+
+'CHALLENGE: get text in all paragraph from the below page. we are not intereste in the data contained in other elems like images etc'
+library(rvest)
+txt <- read_html("https://en.wikipedia.org/wiki/Yoga")
+txt_body <- txt %>% html_node("body") %>% html_text()
+txt_body
+
+# get all <p> tags (just the paragraph tags "p")
+txt_p <- txt %>% html_nodes("p") %>% html_text()
+txt_p #the text looks clean exept for the citations "[301], [12] etc"
+
+'Remove any remaining HTML: html regex. \\w and \\s and all that follows below is a text sintax of html....'
+pattern <- "</?\\w+((\\s+\\w+(\\s*=\\s*(?:\".*?\"|'.*?'|[^'\">\\s]+))?)+\\s*|\\s*)/?>"
+txt_m1 = stringr::str_replace_all(txt_p,pattern,"")  # from stringr package.
+head(txt_m1)
+
+'Remove extra whitespaces between words'
+txt_m2 <- stringr::str_wrap(txt_m1)
+head(txt_m2)
+
+'Remove citations'
+txt_out <- stringr::str_replace_all(txt_m2, "\\[.*\\]", "")
+txt_out 
+'Convert to sentences.-----------------------------------'
+#Web URL: http://datacube.wu.ac.at/src/contrib/           
+#Package: "openNLPmodels.en_1.5-1.tar.gz"
+#install.packages("NLP")
+#install.packages("openNLP")
+library(NLP)
+library(openNLP)
+options(java.parameters = "-Xmx4000m")  # for more memory.
+
+# Create fn to compute sentence annotations with Apache OpenNLP Maxent sentence detector
+sentence_token_annotator <- openNLP::Maxent_Sent_Token_Annotator(language = "en")
+
+# Convert text to class String from package NLP
+text <- NLP::as.String(txt_out)
+
+sentence.boundaries <- NLP::annotate(text, sentence_token_annotator)  # Sentence boundaries
+sentences <- text[sentence.boundaries] # Extract sentences
+head(sentences)
+
+# remove newline chars '\n'
+sentences_1 <- vapply(sentences, function(x){stringr::str_replace_all(x, "\n", " ")}, 
+                      FUN.VALUE = character(1))
+
+# remove the extra double quotes '"' 
+sentences_2 <- vapply(sentences_1, function(x){stringr::str_replace_all(x, '[\\"*]', "")},
+                      FUN.VALUE = character(1))
+
+names(sentences_2) <- NULL
+writeLines(sentences_2, "sentences.txt")  # save in file
+```
+
+--- corpus, tdm, tf-idf, word cloud ---
+
+```{r Web scraping 2}
+#install.packages("tm")
+#install.packages("lsa")
+#install.packages("tidytext")
+library(tm) 
+library(lsa)
+library(tidytext)
+# cp <- Corpus(DirSource("Path/To/Directory/"))
+
+# Read text
+char_vec <- readLines("https://raw.githubusercontent.com/selva86/datasets/master/yoga_wiki.txt")
+'Corpus ---------------------------------------------'
+# Create Corpus. a collection of documents
+cp <- Corpus(VectorSource(char_vec))
+cp # each document is a line
+inspect(cp)  # inspect each document in corpus
+cp[[1]]$content # content variable read the text or show as character
+as.character(cp[[1]])
+
+to_char <- function(corpus, start=1, end=NULL){ #Function to view inside the corpus instead of on by one as above
+  if(is.null(end)){
+    end=length(corpus)  
+  }
+  sapply(corpus[start:end], function(x){paste(x$content)})
+}
+to_char(cp, 1, 15)
+'Meta Data ----------------------------------------'
+# View and modify Meta data
+meta(cp[[1]])
+meta(cp[[1]], tag = "source") <- "wiki"
+meta(cp[[1]])
+
+'Text Transformations: make our own transformations ---------------------------'
+getTransformations()  # get built-in text transformers
+
+# transformer to remove html
+pattern <- "</?\\w+((\\s+\\w+(\\s*=\\s*(?:\".*?\"|'.*?'|[^'\">\\s]+))?)+\\s*|\\s*)/?>"
+rmHTML <- function(x) gsub(pattern, "", x)
+
+cp_nohtml <- tm_map(cp, content_transformer(rmHTML))
+to_char(cp_nohtml[1:10])
+
+# remove punctuations
+cp_noPun <- tm_map(cp_nohtml, content_transformer(removePunctuation))
+to_char(cp_noPun[1:10])
+
+# stopwords sources (not useful for meaning)
+tm::stopwords()  # tm pkg
+lsa::stopwords_en  # lsa pkg
+tidytext::stop_words  # tidytext pkg
+
+'Text transformations ----------------------------------------------'
+cp_lower <- tm_map(cp_noPun, content_transformer(tolower))  # convert to lower case
+cp_noStpwrds <- tm_map(cp_lower, content_transformer(removeWords), stopwords())  # remove stopwords
+cp_noSpace <- tm_map(cp_noStpwrds, content_transformer(stripWhitespace))  # strip whitespace
+cp_clean <- tm_map(cp_noSpace, content_transformer(trimws))  # trim trailing and leading whitespace.
+
+# Stemming and Stem completion
+cp_clean_copy <- cp_clean
+cp_clean_stem <- tm_map(cp_clean, stemDocument)
+to_char(cp_clean_stem[1:10])
+
+cp_comp <- tm_map(cp_clean_stem, stemCompletion, dictionary=cp_clean_copy)
+to_char(cp_comp[1:10])
+
+# Solution by yanchang zhao:
+# http://stackoverflow.com/questions/25206049/stemcompletion-is-not-working
+# PDF: https://goo.gl/vueUa3s
+
+stemCompletion2 <- function(x, dictionary) {
+  x <- unlist(strsplit(as.character(x), " "))
+  # Unexpectedly, stemCompletion completes an empty string to
+  # a word in dictionary. Remove empty string to avoid above issue.
+  x <- x[x != ""]
+  x <- stemCompletion(x, dictionary=dictionary)
+  x <- paste(x, sep="", collapse=" ")
+  PlainTextDocument(stripWhitespace(x))
+}
+myCorpus <- lapply(cp_clean_stem, stemCompletion2, dictionary=cp_clean)
+cp_complete <- Corpus(VectorSource(myCorpus))
+
+to_char(cp_complete[1:10])
+
+'Term Document Matrix ---------------------------------------'
+# Create term document matrix and find frequent words
+tdm <- TermDocumentMatrix(cp_complete)
+findFreqTerms(tdm, lowfreq=10) 
+m <- as.matrix(tdm)
+dim(m)
+summary(rowSums(m))
+
+# Remove sparse terms (mostly blank spaces but sometimes are the most valuable)
+tdm2 <- removeSparseTerms(tdm, 0.99) # Prepare the data (max 15% empty space)   
+m_2 <- as.matrix(tdm2)
+summary(rowSums(m_2))
+
+
+'TF-IDF inverse document frequency -----------------------------'
+# Normalize with TF-IDF. see formula online.
+# Method 1:
+tdm_w <- weightTfIdf(tdm, normalize = FALSE)  # weight by TFIDF.
+
+# Method 2:
+tdm_w <- TermDocumentMatrix(cp_complete, control = list(removePunctuation=TRUE,
+                                                        removeNumbers=TRUE,
+                                                        stopwords=TRUE,
+                                                        weighting=weightTfIdf))
+m_3 <- as.matrix(tdm_w)
+dim(m_3)
+summary(rowSums(m_3))
+
+'Word Cloud ------------------------------------'
+#install.packages("wordcloud")
+library(wordcloud)
+word.freq <- sort(rowSums(m_3), decreasing = T)
+
+# color palette
+brewer.pal.info  # show available palettes
+pal <- RColorBrewer::brewer.pal(8,"Dark2")  # define colour pallet
+# pal <- brewer.pal(8,"Spectral")  # define colour pallet
+# pal <- brewer.pal(8,"Set2")  # define colour pallet
+
+# plot word cloud
+wordcloud(words = names(word.freq), freq = word.freq, random.order = F, 
+          colors = pal, max.words = 700)
+
+'WordCloud2 (htmlWidgets) ----------------------'
+# html implementation with wordcloud2.js
+library(wordcloud2)
+word.freq <- sort(rowSums(m_3), decreasing = T)
+
+# color palette
+pal <- RColorBrewer::brewer.pal(8,"Dark2")  # define colour pallet
+
+word.freq <- sort(rowSums(m_3), decreasing = T)
+df <- as.data.frame(word.freq)
+df$word <- rownames(df)
+colnames(df) <- c("freq", "word")
+df <- df[, c("word", "freq")]  # reorder columns
+
+# draw wordcloud
+wordcloud2(df, color = pal)
+wordcloud2(df, color = pal, shape = "triangle-forward")
+
+'Challenge: process a snipped from pride and predjudice -------------------'
+#install.packages("wordcloud")
+#install.packages("wordcloud2")
+library(wordcloud)
+library(wordcloud2)
+tx <- readLines("https://raw.githubusercontent.com/selva86/datasets/master/prideprejudice.txt")
+tx <- stringr::str_replace_all(tx, "[^[:alnum:] \\.]", "")  # keep only alpha numeric and space
+cpx <- tm::Corpus(VectorSource(tx))
+# Create TDM
+cpx <- tm::tm_map(cpx, content_transformer(tolower))  # convert to lower case
+cpx <- tm::tm_map(cpx, content_transformer(removeWords), lsa::stopwords_en)  # remove stopwords
+cpx <- tm::tm_map(cpx, content_transformer(stripWhitespace))  # strip whitespace
+cpx <- tm::tm_map(cpx, content_transformer(trimws))  # trim trailing and leading whitespace.
+tdm_cp <- tm::TermDocumentMatrix(cpx, control = list(removePunctuation = TRUE))
+m <- as.matrix(tdm_cp)
+# draw word cloud
+pal <- RColorBrewer::brewer.pal(8,"Spectral")  # define colour pallet
+word.freq <- sort(rowSums(m), decreasing = T)
+wordcloud(words = names(word.freq), freq = word.freq, random.order = F, colors = pal, max.words = 700)
+```
+
+--- 3. cosine similarity and latent semantic analysis ---
+1. cosine similarity to group similar documents
+2. latend semantic analysis LSA: cluster ismilar documents
+```{r Web scraping 3}
+library(tm) 
+library(lsa)
+
+'Create corpus ------------------------------------------------------'
+wiki_docs <- Corpus(DirSource("02. Mastering R/data/cosine_sim"))
+# Download link: https://github.com/selva86/Mastering-R-Programming/tree/master/Datasets u have to download this document in ur repo
+wiki_docs
+
+# Func to view corpus
+to_char <- function(corpus, start=1, end=NULL){
+  if(is.null(end)){
+    end=length(corpus)  
+  }
+  sapply(corpus[start:end], function(x){paste(x$content)})
+}
+
+wiki_docs <- tm_map(wiki_docs, removeWords, c(lsa::stopwords_en))
+
+# a longer list of stop words.
+stpwords <- readLines("https://raw.githubusercontent.com/selva86/datasets/master/stopwords_long")
+
+wiki_docs <- tm_map(wiki_docs, removeWords, stpwords)
+wiki_docs <- tm_map(wiki_docs, removeNumbers)
+wiki_docs <- tm_map(wiki_docs, removePunctuation)
+wiki_docs <- tm_map(wiki_docs, content_transformer(function(x){stringr::str_wrap(x)}) )
+to_char(wiki_docs)
+wiki_docs <- tm_map(wiki_docs, content_transformer(function(x){stringr::str_replace_all(x, "\n", " ")}))
+to_char(wiki_docs)
+
+tdm_wiki <- TermDocumentMatrix(wiki_docs, control = list(removePunctuation=TRUE,
+                                                         removeNumbers=TRUE,
+                                                         stopwords=stpwords))
+
+'Cosine Similarity'
+m <- as.matrix(tdm_wiki)
+View(m)
+csn <- lsa::cosine(m)
+csn
+
+# Latent Semantic Analysis.
+wiki_docs <- Corpus(DirSource("02. Mastering R/data/lsa_sports_politics_docs"))
+# Download Link: https://github.com/selva86/Mastering-R-Programming/tree/master/Datasets
+
+wiki_docs <- tm_map(wiki_docs, content_transformer(removeWords), c(lsa::stopwords_en))
+wiki_docs <- tm_map(wiki_docs, content_transformer(removeNumbers))
+wiki_docs <- tm_map(wiki_docs, content_transformer(removePunctuation))
+wiki_docs <- tm_map(wiki_docs, content_transformer(function(x){stringr::str_wrap(x)}) )
+wiki_docs <- tm_map(wiki_docs, content_transformer(function(x){stringr::str_replace_all(x, "\n", " ")}) )
+to_char(wiki_docs)
+
+tdm_wiki <- TermDocumentMatrix(wiki_docs, control = list(removePunctuation=TRUE,
+                                                         removeNumbers=TRUE,
+                                                         stopwords=stpwords,
+                                                         weighting=weightTfIdf))
+
+# Run LSA
+lsa_out = lsa::lsa(tdm_wiki, dims=lsa::dimcalc_share())
+lsa_out # returns 3 matrices: dk, ak and sk. they have all meanings
+
+# docs_df
+docs_mat <- lsa_out$dk[, c(1:2)]
+plotmat_docs_df <- as.data.frame(docs_mat)
+colnames(plotmat_docs_df) <- c("Dim1", "Dim2")
+
+# k-means cluster the docs dataframe.
+set.seed(101)
+clus <- kmeans(plotmat_docs_df, 3)
+plotmat_docs_df$cluster <- factor(clus$cluster)
+
+# plot documents in ggplot2
+# devtools::install_github("slowkow/ggrepel@0.6.2")
+library(ggplot2)
+library(ggrepel)
+ggplot2::ggplot(plotmat_docs_df, aes(x=Dim1, y=Dim2)) +
+  ggplot2::geom_point(size=2, aes(color=cluster)) +
+  ggrepel::geom_text_repel(aes(label = rownames(plotmat_docs_df)), 
+                           data = plotmat_docs_df, size=3) + 
+  ggplot2::theme_bw()
+
+'challenge: download and cluster similar documents'
+# Latent Semantic Analysis.
+wiki_docs <- Corpus(DirSource("02. Mastering R/data/lsa_sports_food_docs"))
+# Download link: https://github.com/selva86/Mastering-R-Programming/tree/master/Datasets
+
+wiki_docs <- tm_map(wiki_docs, content_transformer(removeWords), c(lsa::stopwords_en))
+wiki_docs <- tm_map(wiki_docs, content_transformer(removeNumbers))
+wiki_docs <- tm_map(wiki_docs, content_transformer(removePunctuation))
+wiki_docs <- tm_map(wiki_docs, content_transformer(function(x){stringr::str_wrap(x)}) )
+wiki_docs <- tm_map(wiki_docs, content_transformer(function(x){stringr::str_replace_all(x, "\n", " ")}) )
+to_char(wiki_docs)
+
+tdm_wiki <- TermDocumentMatrix(wiki_docs, control = list(removePunctuation=TRUE,
+                                                         removeNumbers=TRUE,
+                                                         stopwords=TRUE,
+                                                         weighting=weightTfIdf))
+# Run LSA
+lsa_out = lsa::lsa(tdm_wiki, dims=lsa::dimcalc_share())
+# docs_df
+docs_mat <- lsa_out$dk[, c(1:2)]
+plotmat_docs_df <- as.data.frame(docs_mat)
+colnames(plotmat_docs_df) <- c("Dim1", "Dim2")
+# k-means cluster the docs dataframe.
+set.seed(101)
+clus <- kmeans(plotmat_docs_df, 3)
+plotmat_docs_df$cluster <- factor(clus$cluster)
+# plot documents in ggplot2
+ggplot(plotmat_docs_df, aes(x=Dim1, y=Dim2)) +
+  geom_point(size=2, aes(color=cluster)) +
+  ggrepel::geom_text_repel(aes(label = rownames(plotmat_docs_df)), data = plotmat_docs_df, size=3) + theme_bw()
+```
+
+--- 4. extracting topics with latent dirichlet allocation ---
+  extract document's keywords and topics. DO THE CHALLENGE!
+  unsupervised probabilistic modelling technique
+  works with the assumption that a document is a mixture of multiple topics and each topic is a mixture of keywords
+```{r Web scraping 4 best example DO THE CHALLENGE TO UNDERSTAND}
+################################# 1
+library(tm)
+options(scipen=999)
+wiki_docs <- Corpus(DirSource("02. Mastering R/data/lda_sports_politics_long_docs"))
+# alt source: 
+# https://github.com/selva86/Mastering-R-Programming/tree/master/Datasets/lda_sports_politics_long_docs
+
+# Func to view corpus
+to_char <- function(corpus, start=1, end=NULL){
+  if(is.null(end)){
+    end=length(corpus)  
+  }
+  sapply(corpus[start:end], function(x){paste(x$content)})
+}
+################ 2 Text Processing 
+stpwords <- readLines("https://raw.githubusercontent.com/selva86/datasets/master/stopwords_long")
+wiki_docs <- tm_map(wiki_docs, content_transformer(tolower))
+wiki_docs <- tm_map(wiki_docs, removeWords, c(lsa::stopwords_en, stpwords))
+wiki_docs <- tm_map(wiki_docs, removeNumbers)
+wiki_docs <- tm_map(wiki_docs, removePunctuation)
+wiki_docs <- tm_map(wiki_docs, content_transformer(function(x){stringr::str_wrap(x)}) )
+wiki_docs <- tm_map(wiki_docs, content_transformer(function(x){stringr::str_replace_all(x, "\n", " ")}) )
+to_char(wiki_docs)
+
+# Doc Term Matrix
+dtm <- DocumentTermMatrix(wiki_docs, control = list(removePunctuation=TRUE,
+                                                    removeNumbers=TRUE,
+                                                    stopwords=TRUE))
+dim(dtm)
+inspect(dtm)[1:4, ]
+################### 3 LDA 
+library(topicmodels)
+# Set parameters
+burnin = 4000
+iter = 2000
+thin = 500
+seed = list(2003,5,63,100001,765)
+nstart = 5
+best = TRUE
+# Number of topics
+k = 4
+# Run LDA with GIBBS SAMPLING
+res <-LDA(dtm, k, method="Gibbs", control = list(nstart = nstart, seed = seed, 
+                                                 best = best, burnin = burnin, 
+                                                 iter = iter, thin = thin))
+res
+# Number of topics in each document
+res_topics = as.matrix(topics(res))
+print(res_topics)
+# Top 30 terms
+res_terms = as.matrix(terms(res, 30))
+print(res_terms)# topic 1 has topics related to sport, topic 2 to politics etc..
+
+# Show topic probabilities. Rows are documents and Columns are the topics.
+res_topicProbs = as.data.frame(res@gamma)
+print(cbind(rownames(res_topics), res_topicProbs))
+# Check that each term is allocated to all topics
+print(rowSums(res_topicProbs))
+
+##################### 4 visualization using Heat Map with Dendrogram 
+# install.packages("d3heatmap")
+library(d3heatmap)
+library(RColorBrewer)
+topic_probs <- data.matrix(res_topicProbs)  # convert to matrix
+
+# Set column and row names
+colnames(topic_probs) <- c("Sports", "Politics", "Food", "India-Politics")
+rownames(topic_probs) <- rownames(res_topics)
+
+# draw heatmap
+d3heatmap(topic_probs, colors = brewer.pal(9, "Greens"), scale="column", margins=c(5,5), dendrogram = "row", k_row = 5, cexRow=0.75)
+#######################################################################################
+' Challenge: use LDA to extract keywords associated with the topics' 
+library(tm)
+options(scipen=999)
+df <- read.csv("https://raw.githubusercontent.com/selva86/datasets/master/text_classfication.csv", 
+               stringsAsFactors = F)
+               
+# df <- read.csv("https://goo.gl/l8sWCN", stringsAsFactors = F)
+
+wiki_docs <- Corpus(VectorSource(df$content))
+stpwords <- readLines("https://raw.githubusercontent.com/selva86/datasets/master/stopwords_long")
+wiki_docs <- tm_map(wiki_docs, content_transformer(tolower))
+wiki_docs <- tm_map(wiki_docs, removeWords, c(lsa::stopwords_en, stpwords))
+wiki_docs <- tm_map(wiki_docs, removeNumbers)
+wiki_docs <- tm_map(wiki_docs, removePunctuation)
+wiki_docs <- tm_map(wiki_docs, content_transformer(function(x){stringr::str_wrap(x)}) )
+wiki_docs <- tm_map(wiki_docs, content_transformer(function(x){stringr::str_replace_all(x, "\n", " ")}) )
+dtm <- DocumentTermMatrix(wiki_docs, control = list(removePunctuation=TRUE, 
+                                                    removeNumbers=TRUE, stopwords=TRUE))
+
+dim(dtm)
+# Set parameters
+#install.packages("topicmodels")
+library(topicmodels)
+burnin = 4000
+iter = 2000
+thin = 500
+seed = list(2003,5,63,100001,765)
+nstart = 5
+best = TRUE
+
+k = 3 # Number of topics
+
+# Run LDA
+res <-LDA(dtm, k, method="Gibbs", control = list(nstart = nstart, seed = seed, best = best, burnin = burnin, iter = iter, thin = thin))
+# Number of topics in each document
+res_topics = as.matrix(topics(res))
+# Top 30 terms
+res_terms = as.matrix(terms(res, 30))
+# Show topic probabilities. Rows are documents and Columns are the topics.
+res_topicProbs = as.data.frame(res@gamma)
+topic_probs <- data.matrix(res_topicProbs)  # convert to matrix
+# Set column and row names
+colnames(topic_probs) <- c("Sports", "Politics", "Food")
+rownames(topic_probs) <- df$articles
+# draw heatmap
+#install.packages("d3heatmap")
+d3heatmap::d3heatmap(topic_probs, colors = RColorBrewer::brewer.pal(9, "Blues"), 
+                    scale="column", margins=c(5,5), dendrogram = "row", k_row = 5, cexRow=0.75)
+```
+
+
+--- 5. sentiment scoring OF CHAT TRANSCRIPTS with tidytext and syuzhet ---
+
+```{r Web scraping 5}
+# tidytext
+#install.packages("fortunes")
+library(dplyr)
+library(fortunes)
+library(tidytext)
+library(ggplot2)
+theme_set(theme_bw())
+
+df <- read.csv("https://goo.gl/mkDSD7", stringsAsFactors = F)  
+# full url: https://raw.githubusercontent.com/selva86/datasets/master/phone_transcripts.csv
+' Score Sentiments: the food was not good containst "good" in a negative context...' 
+AFINN <- sentiments %>% 
+  filter(lexicon == "AFINN") # stored as tibble object
+
+df_sentiments <- df %>% unnest_tokens(word, Comments) %>%
+                      anti_join(stop_words, by = "word") %>%  # remove stopwords
+                      inner_join(AFINN, by = "word")  # retain only sentiments.
+#View(df_sentiments) # only words contributing to sentiment are retained
+df_sentiments_grouped <- group_by(df_sentiments, ID) %>%
+  summarize(words = n(),
+            recommend=unique(Recommend),
+            quotes = n_distinct(ID),
+            sentiment = mean(score),
+            any_negative_words=if(any(score < 0)){TRUE}else{FALSE})
+View(df_sentiments_grouped)
+
+'Plot -----------------------------------------------------'
+library(ggplot2)
+ggplot(df_sentiments_grouped, aes(ID, sentiment, fill = sentiment > 0)) +
+  geom_bar(stat = "identity", show.legend = FALSE) + 
+  labs(y="Average AFINN sentiment", title="Sentiment by Caller") + 
+  coord_flip()
+
+'Syuzhet ------------------------------------------------'
+#install.packages("syuzhet")
+library(syuzhet)
+df$syuzhet <- get_sentiment(df$Comments)
+df$syuzhet_bing <- get_sentiment(df$Comments, method = "bing")
+df$syuzhet_afinn <- get_sentiment(df$Comments, method = "afinn")
+df$syuzhet_nrc <- get_sentiment(df$Comments, method = "nrc")
+View(df)
+
+# Sentence moods from 'nrc' lexicon
+get_nrc_sentiment(df$Comments)
+```
+
+--- 6. classifying texts with RTextTools ---
+
+```{r Web scraping 6}
+#install.packages("RTextTools")
+library(RTextTools)
+docs <- read.csv("https://goo.gl/9gO9jU", stringsAsFactors = F)  
+# alt source: https://goo.gl/kjyT8K
+# data URL: "https://archive.ics.uci.edu/ml/machine-learning-databases/00233/CNAE-9.data"
+# Data desc url: https://archive.ics.uci.edu/ml/datasets/CNAE-9
+
+## Bypassed DTM creation, is not needed because he did the preprocessing already
+# doc_matrix <- create_matrix(text, language="english", removeNumbers=TRUE, 
+#                              stemWords=TRUE, removeSparseTerms=.998)
+
+dim(docs)
+doc_matrix <- as.matrix(docs[, -1])
+container <- create_container(doc_matrix, docs[, 1], trainSize=1:900, 
+                              testSize=901:1079, virgin=FALSE)
+container # we can run multiple machine learning algo at the same time with Rtool
+# ML Models Training
+SVM <- train_model(container,"SVM")
+GLMNET <- train_model(container,"GLMNET")
+MAXENT <- train_model(container,"MAXENT")
+SLDA <- train_model(container,"SLDA")
+BOOSTING <- train_model(container,"BOOSTING")
+BAGGING <- train_model(container,"BAGGING")
+RF <- train_model(container,"RF")
+NNET <- train_model(container,"NNET")
+TREE <- train_model(container,"TREE")
+
+actuals <- tail(docs[, 1], 179)
+actuals
+
+# predict
+SVM_CLASSIFY <- classify_model(container, SVM)
+GLMNET_CLASSIFY <- classify_model(container, GLMNET)
+MAXENT_CLASSIFY <- classify_model(container, MAXENT)
+SLDA_CLASSIFY <- classify_model(container, SLDA)
+BOOSTING_CLASSIFY <- classify_model(container, BOOSTING)
+BAGGING_CLASSIFY <- classify_model(container, BAGGING)
+RF_CLASSIFY <- classify_model(container, RF)
+NNET_CLASSIFY <- classify_model(container, NNET)
+TREE_CLASSIFY <- classify_model(container, TREE)
+
+# Misclass Rate (svm and rf have lowest error rate), we can use them to classify text
+mean(as.character(SVM_CLASSIFY$SVM_LABEL) != actuals)
+mean(as.character(GLMNET_CLASSIFY$GLMNET_LABEL) != actuals)
+mean(as.character(MAXENT_CLASSIFY$MAXENTROPY_LABEL) != actuals)
+mean(as.character(SLDA_CLASSIFY$SLDA_LABEL) != actuals)
+mean(as.character(BOOSTING_CLASSIFY$LOGITBOOST_LABEL) != actuals)
+mean(as.character(BAGGING_CLASSIFY$BAGGING_LABEL) != actuals)
+mean(as.character(RF_CLASSIFY$FORESTS_LABEL) != actuals)
+mean(as.character(NNET_CLASSIFY$NNETWORK_LABEL) != actuals)
+mean(as.character(TREE_CLASSIFY$TREE_LABEL) != actuals)
+```
+
+
+----------------------
+*SECTION 8: GGplot*
+----------------------
+  1. core knowledge for making charts with ggplot2
+  2. ggplot2basics, aesthetics and themse
+  3. manipulating legend add test, and annotation
+  4. faceting and change layouts
+  5. bar chart, boxpot, time series, and ribbon plots
+  6. ggplot2 extensions and ggplotly
+  
+--- core knowledge aesthetics and themes ---
+  1. understand general ggplot format: works with DF and not with separate vectors
+  2. scatter plot
+  3. x and y limits
+  4. titles and axis labes
+  5. color and size points
+```{r core ggplot}
+library(ggplot2)
+
+data("midwest", package = "ggplot2")
+# midwest <- read.csv("http://goo.gl/G1K41K")  
+# Full link: https://raw.githubusercontent.com/selva86/datasets/master/midwest.csv
+
+'Basic Scatterplot and Line of best Fit'
+g <- ggplot(midwest, aes(x=area, y=poptotal)) + geom_point() + #works with DF. the second feature is the aesthetic
+  geom_smooth(method="lm")
+plot(g)
+
+'Change X and Y axis limits by deleting the points not in range'
+g + xlim(c(0,0.1)) + ylim(c(0, 1000000))   # channging the limits you change the lm fit regresssion. in this case u delete
+
+'Change X and Y axis limits by Zooming in'
+g1 <- g + coord_cartesian(xlim=c(0,0.1), ylim=c(0, 1000000))  # in this case u zoom in, it's better so u don't delete points.
+plot(g1)
+
+'Add Title, Subtitle, Caption, X and Y Axis labels'
+g1 + labs(title="Area Vs Population\nFrom midwest dataset", 
+          subtitle="Line of best fit unchanged",
+          caption="Source: Ggplot2", # caption is like the NB where u write the source
+          y="Population", x="Area")
+
+'Full Function Call'
+gg <- ggplot(midwest, aes(x=area, y=poptotal)) + 
+  geom_point(aes(col=state)) + 
+  geom_smooth(method="lm", col="firebrick") + 
+  coord_cartesian(xlim=c(0,0.1), ylim=c(0, 1000000)) + 
+  labs(title="Area Vs Population From midwest dataset", 
+       y="Population", x="Area", 
+       subtitle="With Line of best fit", caption="Source: Ggplot2") +
+  theme(legend.position = "None") # you remove the box on the right of the plot with the legends for the "col"
+gg
+
+'Change Color Palette'
+gg + scale_colour_brewer(palette = "Set1")
+
+'Full list of Color Palettes'
+library(RColorBrewer)
+brewer.pal.info
+
+'Change Axis Text'
+gg + scale_x_continuous(breaks=seq(0, 0.1, 0.01), labels = letters[1:11]) 
+# continuos is for continuos variable. 
+# breaks show the ticks and is set forfrom 0 to 0.1 changing by 0.01
+# the label is the in letter format now but could be percentage too like the code below
+
+'Format Axis Text'
+gg <- gg + scale_x_continuous(breaks=seq(0, 0.1, 0.01), 
+                        labels = sprintf("%1.2f%%", seq(0, 0.1, 0.01))) + 
+  scale_y_continuous(breaks=seq(0, 1000000, 200000))
+
+'Change theme elements'
+gg1 <- gg + theme(plot.title=element_text(size=12, face="bold", color="steelblue", lineheight=1.2), # inside theme change colos and letter
+                  axis.title.x=element_text(size=10), axis.title.y=element_text(size=10), # axis title
+                  axis.text.x=element_text(size=10, angle = 30), axis.text.y=element_text(size=10))  # axis text and rotate
+plot(gg1)
+
+
+'Change the entire theme with built-in themes'
+gg1 + theme_bw()
+gg1 + theme_light()
+
+
+
+'Challenge'
+library(ggplot2)
+data("midwest", package = "ggplot2")
+# midwest <- read.csv("http://goo.gl/G1K41K") 
+
+gg <- ggplot(midwest, aes(x=popamerindian, y=popasian)) + 
+  geom_point(aes(col=state)) +
+  geom_smooth(method="lm", col="firebrick") + 
+  xlim(c(0, 1000)) + 
+  ylim(c(0, 1000)) +
+  labs(title="Population of American Indians Vs Asians", 
+       y="Pop. Asian", x="Pop. American Indian")
+
+plot(gg)
+
+gg + theme(plot.title=element_text(size=12, face="bold", 
+                                   color="steelblue", lineheight=1.2), 
+           axis.title.x=element_text(size=10), axis.title.y=element_text(size=10), 
+           axis.text.x=element_text(size=10), axis.text.y=element_text(size=10))
+```
+
+--- ggplot2basics, aesthetics and themse ---
+PERFECT EXAMPLE TO LEARN
+```{r perfect example of scatteplot}
+library(ggplot2)
+data("midwest", package = "ggplot2")
+# midwest <- read.csv("http://goo.gl/G1K41K") 
+# Full link: https://raw.githubusercontent.com/selva86/datasets/master/midwest.csv
+
+'Add plot components to the scatterplot'
+gg <- ggplot(midwest, aes(x=area, y=poptotal)) + # specify DF and x and y in the scatterplot
+  geom_point(aes(col=state, size=popdensity)) + # for the points, represent them by size and color
+  geom_smooth(method="lm", col="firebrick") + # add a regression smoothed line using lm method
+  coord_cartesian(xlim=c(0, 0.1), ylim=c(0, 1000000)) + # zoom in without chaning the regression 
+  labs(title="Area Vs Population", y="Population", x="Area") # labs title, x and y
+
+'Legend ---------------------------------------------------------------------------------------'
+# Change Legend Title
+gg <- gg + scale_color_discrete(name="State") + scale_size_continuous(name = "Density") # give name to boxes on the right
+
+# Change Legend Position
+gg + theme(legend.position="left")
+gg + theme(legend.position="bottom")
+gg + theme(legend.justification=c(1,0), legend.position=c(1,0))  # inside the plot
+gg + theme(legend.justification=c(1,1), legend.position=c(1,1))  # inside the plot
+
+# Change styling of legend
+gg <- gg + theme(legend.title = element_text(size=12, color = "firebrick"), # box=legend change size and color
+                 legend.text = element_text(size=10), # element in the legend size=10
+                 legend.key=element_rect(fill='gray')) + # fill the rectangle of grey
+  guides(colour = guide_legend(override.aes = list(size=2,  stroke=1.5))) 
+
+
+'Text -----------------------------------------------------------------------------------------'
+# make dataset with filtered rows.
+midwest_sub <- midwest[midwest$poptotal > 400000, ]
+midwest_sub$large_county <- ifelse(midwest_sub$poptotal > 400000, midwest_sub$county, "")
+
+# Plot texts
+gg + geom_text(aes(label=large_county), size=2, data=midwest_sub)   # text
+gg <- gg + geom_label(aes(label=large_county), size=2, data=midwest_sub, alpha=0.25)   # label
+plot(gg)
+
+gg + coord_flip()  # flip the X and Y axis
+gg + scale_x_reverse() + scale_y_reverse()  # reverse the scales of X and Y axis so that the origin is up right
+
+'Custom Annotation -----------------------------------------------------------------------------'
+library(grid)
+my_text <- "This text is at x=0.7 and y=0.9!"
+my_grob = grid.text(my_text, x=0.7,  y=0.9, gp=gpar(col="firebrick", #create an object "grob"
+                                                    fontsize=10, fontface="bold"))
+class(my_grob)
+gg + annotation_custom(my_grob)
+
+
+'Challenge ----------------------------------------------------------------------------------------'
+gg <- ggplot(data=cars, aes(x=speed, y=dist, size=dist)) + 
+  geom_point() + geom_smooth() + labs(title="Cars", x="Speed", y="Dist")
+print(gg)
+my_text <- "The faster the car, the longer it takes to stop\n So maintain a longer safe distance at high speeds."
+my_grob = grid.text(my_text, x=0.3,  y=0.85, gp=gpar(col="steelblue", fontsize=10, fontface="bold"))
+gg + annotation_custom(my_grob) + theme(legend.position="None")
+```
+
+--- drawing multiple plots---
+
+```{r multiple charts}
+library(ggplot2)
+data(mpg, package="ggplot2")
+# mpg <- read.csv("http://goo.gl/uEeRGu")
+# full link: https://raw.githubusercontent.com/selva86/datasets/master/mpg_ggplot2.csv
+
+'standard scatterplot; note the black and white theme'
+g <- ggplot(mpg, aes(x=displ, y=hwy)) + 
+  geom_point() + 
+  geom_smooth(method="lm") + 
+  theme_bw()
+plot(g)
+
+'Multiple Plots with Facet Wrap and Facet Grid --------------------------------------------'
+g + facet_wrap( ~ class) # split displ and hwy PER EACH CLASS WITH THE SAME SCALE 
+g + facet_wrap( ~ class, scales = "free") # fits the coordinate of each class for better visualization but different scales
+g + facet_grid( ~ class)  # cut the grid in as many columns as the number of classes to give more space to charts instead of legends
+g + facet_grid( ~ class, scale="free") 
+
+g1 <- g + facet_grid(manufacturer ~ class)
+plot(g1)
+
+g2 <- g + facet_grid(cyl ~ class)
+plot(g2)
+
+
+'Combine multiple ggplot objects in sinlge plot ------------------------------------------'
+library(gridExtra)
+gridExtra::grid.arrange(g1, g2, ncol=2) # TOOOOOOOOOOOOOOOOP! YOU CAN SHOW THE CORRELATION BETWEEN ASSETS IN TWO DIFFERENT YEARS
+
+
+'Challenge -----------------------------------------------------------------------------------'
+mpg_s <- mpg[mpg$class %in% c("suv", "midsize"), ]
+
+library(ggplot2)
+data(mpg, package="ggplot2")
+# mpg <- read.csv("http://goo.gl/uEeRGu")
+g <- ggplot(mpg_s, aes(x=displ, y=hwy)) + 
+  geom_point() + 
+  geom_smooth(method="lm") + 
+  theme_bw() + 
+  facet_grid(class ~ trans)
+plot(g)
+```
+
+--- bar chart, boxpot, time series, and ribbon plots ---
+```{r bar charts and other chart types}
+'load package and data'
+library(ggplot2)
+data(mpg, package="ggplot2")
+# mpg <- read.csv("http://goo.gl/uEeRGu")
+
+'Scatterplot'
+theme_set(theme_bw())  # pre-set the bw theme.
+g <- ggplot(mpg, aes(cty, hwy))
+g + geom_point()
+
+dim(mpg) # the original data has 234 points but the chart show less; this is because some of them are too many overlapping points, JITTER THEM!
+
+'Jitter Plot'
+g + geom_jitter(width = .5, size=1) #width is the distance and size is how big they are
+
+'Counts Plot'
+g + geom_count(col="steelblue")
+
+'Bar Chart'
+g <- ggplot(mpg, aes(manufacturer))
+g + geom_bar()
+g + geom_bar(width=0.5, fill="steelblue")
+g + geom_bar(width=0.5, aes(fill=class))  # multiple colors within the bar.
+
+'Color Palettes'
+RColorBrewer::display.brewer.all()  # display available palettes
+RColorBrewer::brewer.pal.info # available palette names
+
+#Bar chart with color palette
+g + geom_bar(width=0.5, aes(fill=class)) + 
+  scale_fill_brewer(palette = "Set3")  # Paette: Set3
+g + geom_bar(width=0.5, aes(fill=class)) + 
+  scale_fill_brewer(palette = "Spectral") + theme_bw()  # Palette: Spectral 
+
+"Full length bars"
+g + geom_bar(width=0.5, aes(fill=class), position="fill")  # 100% bars with position fill outside aesthetic
+
+"Geom_bar makes a histograme with Continuous variable."
+g <- ggplot(mpg, aes(cty)) + theme_bw()
+g + geom_bar()
+
+"instead of geom_bar use geom_Histogram for continuous variables to change the bins"
+g + geom_histogram(binwidth = 0.5)  # change bin width
+g + geom_histogram(bins = 100)  # change the number of bins
+
+"Aggregate data"
+cty_mpg <- aggregate(mpg$cty, by=list(mpg$manufacturer), FUN=mean)
+colnames(cty_mpg) <- c("manufacturer", "mileage")
+cty_mpg
+
+"Draw plot"
+g <- ggplot(cty_mpg, aes(x=manufacturer, y=mileage, fill=mileage))
+g + geom_bar(stat="identity") # since we are using absolute vaues rather than counts, stat is identity
+
+g <- ggplot(mpg, aes(manufacturer, cty))
+g + geom_boxplot() # confirm that has highest mileage per gallon in city. is it because the light class of car it produces?
+
+g <- ggplot(mpg, aes(manufacturer, cty))
+g + geom_boxplot(aes(fill=class), width=0.5) # by filling with class you see it has the ligther class "subcompact"
+
+
+g + geom_violin(width=3, aes(fill=class))
+
+
+'FORTITY'
+#install.packages("ggfortify")
+library(ggfortify) ################# converts ts objects into dataframe using fortify function
+ts_data <- ggplot2::fortify(AirPassengers)
+ggplot(ts_data, aes(Index, Data)) + geom_line()
+
+"Ribbon are like thicker lines where we have to specify min and max of the tickness of the line"
+ts_data$y2 <- ts_data$Data + runif(nrow(ts_data), 50, 100)
+ggplot(ts_data, aes(Index)) + geom_ribbon(aes(ymin=Data, ymax=y2)) 
+
+"Area is a variation of ribbon plot where the min is zero and therefore fill everything below."
+ggplot(ts_data, aes(Index)) + geom_ribbon(aes(ymin=0, ymax=y2), fill="firebrick") 
+
+ggplot(ts_data, aes(Index)) + geom_area(aes(y=y2), fill="firebrick", alpha=0.5) + 
+  geom_area(aes(y=Data), fill="firebrick")
+
+
+"Answer"
+data("economics", package="ggplot2")
+# economics <- read.csv("http://goo.gl/1P5WJk")
+
+ggplot(economics, aes(x=date)) + 
+  geom_line(aes(y=psavert, col="personal savings")) + 
+  geom_line(aes(y=uempmed, col="employed duration")) + 
+  scale_color_manual(name="Economics", values=c("personal savings"="firebrick", 
+                                                "employed duration"="steelblue")) + 
+  labs(y="Employed duration and Personal savings") +
+  theme_bw()
+```
+
+--- extension of package ggplotly---
+```{r cool extensions}
+#install.packages("ggrepel")
+browseVignettes("ggplot2")
+library(ggplot2)
+library(ggrepel) # to avoid text overlaps
+data("midwest", package = "ggplot2")
+# midwest <- read.csv("http://goo.gl/G1K41K") 
+
+'REPEL to avoid text overlapping on the plotted data: run all the code'
+gg <- ggplot(midwest, aes(x=area, y=poptotal)) + 
+  geom_point(aes(col=state)) + 
+  coord_cartesian(xlim=c(0, 0.1), ylim=c(0, 1000000)) + 
+  labs(title="Area Vs Population", y="Population", x="Area") +
+  theme(legend.position="None")
+
+midwest_sub <- midwest[midwest$poptotal > 400000, ]
+midwest_sub$large_county <- ifelse(midwest_sub$poptotal > 400000, midwest_sub$county, "")
+
+
+gg + geom_text(aes(label=large_county), size=2, data=midwest_sub)   # text
+
+gg + geom_text_repel(aes(label=large_county), size=2, data=midwest_sub)   # text
+gg + geom_label_repel(aes(label=large_county), size=2, data=midwest_sub)   # label
+
+'FORTIFY'
+# install.packages("ggfortify")
+library(ggfortify)
+autoplot(AirPassengers) # for time series
+
+mod <- lm(dist ~ speed, data=cars) # for linear model
+autoplot(mod)
+
+kmod <- kmeans(iris[, -5], 3) # for clustering analysis
+autoplot(kmod, data=iris)
+
+```
+
+----------------------
+*SECTION 9: Speeding Up R Code*
+----------------------
+**TOPICS: to speed up R**
+- speed up R codes:
+  1. Best practices to speed up R code
+  2. parallel computing with doParallel and foreach
+  3. Pipes and DplyR
+  4. Data.Table
+  5. Writing C++ in R with RCpp
+  
+--- Best Practices to speed up R code---
+
+Runtime reduction strategies:
+  1. Vectorize and pre-allocate
+  2. Take condition checks outside the loop
+  3. Runnning the loop only for true conditions
+  4. Using ifelse()
+  5. Using which() smartly
+  6. Using apply family of functions instead of for loops
+  7. Using byte code compilation of the function
+  
+```{r best practice}
+# install.packages("microbenchmark")
+library(microbenchmark) # it supstitute system.time() as it is more accurate
+
+# create dataframe
+set.seed(100)
+col1 <- runif(12^4, 0, 2)
+col2 <- rnorm(12^4, 0, 2)
+col3 <- rpois(12^4, 3)
+col4 <- rchisq(12^4, 2)
+df <- data.frame(col1, col2, col3, col4)
+head(df)
+
+# logic: create new column with simple logic. contain string >4 if sum of 4 collumns in a row exceed 4 else it will contain a string <4. We build a for loop and then we examine ways to analyse and improve the run time
+
+' original for loop'
+original <- microbenchmark({
+  for (i in 1:nrow(df)){#for every row
+    if ((df[i,"col1"]+df[i,"col2"]+df[i,"col3"]+df[i,"col4"])>4){
+      df[i,5] <- "greater_than_4"}else{df[i,5] <- "lower_than_4"}}
+}, times=10L) 
+# if u run microbenchmark without assigning the variable it shows the min, max, mean and median time to run the code among the 10 attempts. here is 6.4 seconds or smtg like that. the function specify the unit mesurements!
+
+# to know which part of the code takes more time, select the lines, go on the menu bar, "select profile by lines"
+
+'improve speed by vectorize and reallocate the output vector'
+output <- character(nrow(df))
+preallocate <- microbenchmark({
+  for(i in 1:nrow(df)){if ((df[i,"col1"]+df[i,"col2"]+df[i,"col3"]+df[i,"col4"])>4){
+    output[i] <- "greater_than_4"}else{output[i] <- "lesser_than_4"}}
+  df$output
+  },times=10L) # by vectorizing and allocating the mean is 1.15 secs
+
+'apply family, much faster'
+apply_output <- microbenchmark({
+  myfunc <- function(x){
+    if ((x['col1']+x['col2']+x['col3']+x['col4'])>4){
+      "greater_than_4"}else{"lesser_than_4"}}
+  output <- apply(df[,c(1:4)], 1, FUN=myfunc) # apply myfunc on everyrow
+  df$output <- output
+}, times=10L)
+apply_output # 115 milliseconds
+
+'to make sligthly faster "byte code compilaiton"'
+library(compiler)
+myFuncCmp <- cmpfun(myfunc)
+bytecode_output <- microbenchmark({
+  output <- apply(df[,c(1:4)], 1, FUN=myFuncCmp)
+})
+bytecode_output # mean is 110 milliseconds
+
+'improving for loop directly by conditions outside' 
+# check for conditions outside for loop whenever possible
+output <- character(nrow(df)) # 1 reallocation
+condition <- (df$col1+df$col2+df$col3+df$col4)>4 # 2 condition check outside for loop
+conditions_outside <- microbenchmark({
+  for (i in 1:nrow(df)){#for every row
+    if (condition[i])
+      {output[i] <- "greater_than_4"}
+    else
+    {output[i] <- "lesser_than_4"}}
+  df$output <- output
+}, times=10L) 
+conditions_outside #10 milliseconds
+
+' running loop only on TRUE conditions'
+output <- rep("lesser_than_4", nrow(df))
+condition <- (df$col1+df$col2+df$col3+df$col4)>4
+only_trues <- microbenchmark({
+  for (i in (1:nrow(df))[condition]){# run loop only for true conditions
+    if (condition[i]){output[i] <- "greater_than_4"}} 
+  df$output <- output})
+only_trues #9 milliseconds
+
+'ifelse statement'
+ifelse_output <- microbenchmark({
+  output <- ifelse((df$col1+df$col2+df$col3+df$col4)>4,"greater_than_4", "lesser_than_4")
+df$output <- output
+}, times=10L) # 5.9 milliseconds
+
+'using which()'
+set.seed(100) # rewrite the dataset otherwise doesn't work because of previous codes
+col1 <- runif(12^4, 0, 2)
+col2 <- rnorm(12^4, 0, 2)
+col3 <- rpois(12^4, 3)
+col4 <- rchisq(12^4, 2)
+df <- data.frame(col1, col2, col3, col4)
+
+which_smart <- microbenchmark({
+  want=which(rowSums(df)>4)
+  output=rep("less than 4", times=nrow(df))
+  output[want]="greater than 4"
+}, times=10L)
+which_smart # 2 milliseconds
+
+'Using data.table::set()'
+# if you cannot create a vector as output and append to the dataset you may consider data.table()
+# install.packages("data.table")
+set.seed(100) # rewrite the dataset otherwise doesn't work because of previous codes
+col1 <- runif(12^4, 0, 2)
+col2 <- rnorm(12^4, 0, 2)
+col3 <- rpois(12^4, 3)
+col4 <- rchisq(12^4, 2)
+df <- data.frame(col1, col2, col3, col4)
+df$output <- ""
+head(df)
+
+library(data.table)
+library(microbenchmark)
+set_output <- microbenchmark({
+  for (i in 1:nrow(df)){
+    if ((df[i,"col1"]+df[i,"col2"]+df[i,"col3"]+df[i,"col4"])>4)
+      {set(df, i, 5L, "greater than 4")}else{set(df,i,5L,"lesser than 4")}}},times=10L)
+set_output # 1.2 seconds (use when u cannot vectorize)
+
+'challenge: improve speed of the following matrix'
+m <- matrix(0, nrow=10000, ncol=10000)
+df <- as.data.frame(m)
+head(df)
+original <- microbenchmark({
+  for (i in 1:nrow(df)){df[i,i] <- i}
+}, times=10L) # 23 seconds
+
+# using set function: fast add, remove and update subsets of columns
+set_output <- microbenchmark({
+  for (i in nrow(df)){set(df,i,i,i)} 
+}) # 3 millisecond
+#set(x,i,j,value) x is a dataframe or datatable. i=nrows, j=ncols, value=list of replacement
+```
+
+  
+--- Parallel Computing---
+Multiple computation of the same task simultaneusly in local computer by multi cores (if u have). There is a computational cost. It is wise to implement it on task that take considerideribly a long time.
+```{r doParallel}
+#install.packages("doParallel")
+library(doParallel) # works best with mac and windows
+library(car)
+
+data(Prestige)
+system.time({ #microbenchmark is more accurate, here the units are only in seconds
+  output <- matrix(0,0,7)
+  for (i in 1:5000){
+    rownums <- sample(102, 70, replace=T)
+    mod <- glm(formula=prestige~education+type+income, data=Prestige[rownums,])
+    output <- rbind(output, broom::glance(mod)) # format the result from model obj
+    } # reg model per each sample
+}) # 20 secs
+
+'paralleling set up'
+library(doParallel)
+cl <- makeCluster(4) # set number of core u want to use
+registerDoParallel(cl) # register in the system
+
+getDoParWorkers() # check how make core u are using
+
+'paralleling actual codes'
+system.time({ #microbenchmark is more accurate, here the units are only in seconds
+  output_par <- foreach(i=1:5000, .combine=rbind, .options.snow=list(preschedule=T)) %dopar% {
+    rownums <- sample(102, 70, replace=T)
+    mod <- glm(formula=prestige~education+type+income, data=Prestige[rownums,])
+    out <- broom::glance(mod)
+    return(out)}
+})
+# now 4 core run simultineusly
+# %dopar% helps to run the statement in parallel. all the result are combineed using "rbind"
+
+'paralleling actual codes inside a function' # export the results from foreach to global environemnt
+modeperf <- function(){
+  r <- foreach(i=1:5000, .combine=rbind, .options.snow=list(preschedule=TRUE),
+               .export=c("Prestige"), .packages=c("broom")) %dopar%{
+                 rownums <- sample(102, 70, replace=T)
+    mod <- glm(formula=prestige~education+type+income, data=Prestige[rownums,])
+    out <- broom::glance(mod)
+    return(out)}}
+r <- modeperf()
+
+stopCluster(cl) # stop the cluster, stop parallel computing
+```
+
+```{r doParallel alternative}
+# Registering cores for parallel process
+library(doSNOW)
+cl <- makeCluster(4, type="SOCK") # 4 – number of cores
+registerDoSNOW(cl) # Register back end Cores for Parallel Computing
+
+#Once the cores are set up to run computations in parallel, the ‘foreach’ loop (from foreach package) can run your functions in parallel by opening as many parallel R session as the number of cores you have registered. The difference between a regular for-loop and for-each loop is, the for-loop runs serially, i.e. your loop processes one value of loop-counter (i) at a time. While in for-each, the arguments you supply to the loop-counter (‘i’ in this case) will be run simultaneously at {number_of_cores_initialised} number of processes at a time. After running the functions defined inside the loop, it combines all the returned values based on the function supplied to the ‘.combine‘ argument.
+
+#################### SOME SIMPLE EXAMPLES
+
+library(foreach)
+foreach(i = 1:28) %dopar% {sqrt(i)} # example 1
+
+# returned output values of the parallel process are combined using 'c()' function
+foreach(i = 1:28,.combine = "c") %dopar% {sqrt(i)} # example 2
+
+# returned output values of the parallel process are combined using 'cbind()' function
+foreach(i = 1:28,.combine = "cbind") %dopar% {letters[1:4]} # example 3
+
+# combine using your custom defined function: "myCustomFunc()" and store in 'output' variable
+output <- foreach(i = 1:28, .combine = "myCustomFunc") %dopar% {
+  sqrt(i)
+}
+
+################### STRUCTURE OF A TYPICAL PARALLEL CODE
+
+allRowIndices <- c(1:nrow(inputData)) # assign row indices of inputData, that will be processed in parallel
+
+output <- foreach (rowNum = allRowIndices, .combine = rbind, .packages = c("caret", "ggplot2", "Hmisc")) %dopar% {
+  # code to process each rowNum goes within this block.
+  # 'n' rows will be processed simultaneously, where 'n' is number of registered cores.
+  # after processing all rows, the returned value is combined using the function defined in `.combine` argument `rbind` in this case. The output thus aggregated is stored in output variable.
+  # Finally, the packages required by functions in this block has to be mentioned within .packages argument.
+}
+stopCluster(cl) # undo the parallel processing setup
+
+################# COMPARISON BETWEEN PARALLEL AND NON PARALLEL
+# NON PARALL
+output_serial <- numeric() # initialize output
+for (rowNum in c(1:nrow(inputData))) {
+  calculatedOutput <- inputData[rowNum, 1] * inputData[rowNum, 2] + inputData[rowNum, 3] / inputData[rowNum, 4] # compute output
+  output_serial <- c(output_serial, calculatedOutput) # append to output variable
+}
+# PARALL
+library(doSNOW)
+cl <- makeCluster(4, type="SOCK") # 4 – number of cores
+registerDoSNOW(cl) # Register Backend Cores for Parallel Computing
+allRowIndices <- c(1:nrow(inputData)) # row numbers of inputData, that will be processed in parallel
+output_parallel <- foreach (rowNum = allRowIndices, .combine = c) %dopar% {
+  calculatedOutput <- inputData[rowNum, 1] * inputData[rowNum, 2] + inputData[rowNum, 3] / inputData[rowNum, 4] # compute output
+  return (calculatedOutput)
+}
+
+```
+
+
+--- writing readable and fast R code with Pepes and DPlyR---
+In this video, Data Manipulation Verbs and Joins:
+filter, slice, select, rename, mutate, transmute, arrange, group_by, summarize, joins
+Streamlining the code using DPlyR
+```{r DPlyR and Pipes}
+#install.packages("dplyr")
+library(dplyr)
+
+'this is how I write now'
+mtcars
+df1 <- subset(mtcars, cyl>6) # subset the dataset if cilinders greater than 6
+df2 <- transform(df1, scale_hp=scale(hp)) # create a new column with hp rescaled
+head(df2) # this require 2 steps! the creation an intermediate dataset.
+
+# if we do in 1 step we write the code inside out and it's not nice like:
+df1 <- transform(subset(mtcars, cyl>6), scale_hp=scale(hp)) # not easy to read
+head(df1) 
+
+'solution with pipes'
+library(dplyr) # the pipes use a flows that goes from left to right like we read and always start with the data object
+output <- mtcars %>% subset(cyl>6) %>% transform(scale_hp=scale(hp)) 
+head(output) # with %>% we transfer the data into the pipe, do the first subset, transfer the result to the second pipe and the outcome is assigned to "output".
+
+'other equivalent ways of writign the pipe'
+output <- mtcars %>% subset(cyl>6, x=.) %>% transform(scale_hp=scale(hp))
+output <- mtcars %>% subset(.$cyl>6) %>% transform(scale_hp=scale(.$hp)) 
+
+'the pipes cannot add layers of subsetting'
+# mtcars %>% subset(cyl>6, hp>200) doesn't work
+
+'solution is DPlyR and its functions that allow multiple subsetting:
+
+Filter and Mutate'
+mtcars %>% filter(cyl>6, hp>200) %>% mutate(scale_hp=scale(hp), pos_hp=abs(scale_hp)) #double subsetting with DPlyR functions
+'select'
+mtcars %>% filter(cyl>6, hp>200) %>% mutate(scale_hp=scale(hp), pos_hp=abs(scale_hp)) %>% 
+  select(mpg, scale_hp, pos_hp) # to only select some column of the filtered dataset
+
+'transmute'
+mtcars %>% filter(cyl>6, hp>200) %>% transmute(scale_hp=scale(hp), pos_hp=abs(scale_hp)) # if you want to retain only the new created dataset
+
+'slice'
+mtcars %>% filter(cyl>6, hp>200) %>% slice(1:5) # just the first 5 rows
+
+'arrange: sort one or more variables' # ordering
+mtcars %>% filter(cyl>6, hp>200) %>% slice(1:5) %>% arrange(mpg) #ascending
+mtcars %>% filter(cyl>6, hp>200) %>% slice(1:5) %>% arrange(-mpg) #descending
+
+'group and summarize'
+mtcars %>% group_by(cyl) %>% summarize(mean_mpg=mean(mpg), max_disp=max(disp)) # you grouped all the data by cyl (we tell for which level we should aggregate data) and summarized into 2 columns named "mean_mpg" and "max_disp". the output is a tibble (is a dataframe but better)
+
+'merging 2 dataframes: merging/joins'
+df1 <- data.frame(x=letters[1:5], y=1:5, stringsAsFactors=F)
+df2 <- data.frame(x=letters[c(3,3:7)], y1=c(3,3:7), stringsAsFactors=F)
+df1; df2
+
+left_join(df1, df2) # keeps all the rows of the left dataframe
+right_join(df1, df2) # keeps all the rows of the right dataframe
+inner_join(df1, df2) # keep only common rows
+semi_join(df1, df2) # keep only common rows with no duplications
+full_join(df1, df2) # does not leave out any row
+anti_join(df1, df2) # keeps only col from LHS
+
+'minichallenge: get min and max col of petal.length and sepal.length for setosa and virgininca species using pipes and dplyr'
+library(dplyr)
+data("iris")
+
+output_dataset <- iris %>% filter(Species %in% c("setosa", "virginica")) %>%  group_by(Species) %>%
+  summarize(Petal.Length.min=min(Petal.Length), 
+            Sepal.Length.min=min(Sepal.Length), 
+            Petal.Length.max=max(Petal.Length), 
+            Sepal.Length.max=max(Sepal.Length)) 
+output_dataset # tibble 2x5
+```
+
+
+--- DATA.TABLE faster than panda and dplyr---
+Is the same of piping and dplyr byt faster!
+```{r data.table}
+# export dataset with 10M rows
+mat <- matrix(sample(10, 10000000, replace=T), ncol=10)
+dim(mat)
+write.csv(mat, "mat.csv", row.names=F)
+
+'import by fread function'
+system.time(mat_base <- read.csv("mat.csv")) # 4.4 seconds
+system.time(mat_fread <- data.table::fread("mat.csv")) # 0.2 seconds
+
+'"setDT" to convert dataframe to DT'
+data("LifeCycleSavings")
+head(LifeCycleSavings)
+class(LifeCycleSavings)
+
+library(data.table)
+data("LifeCycleSavings")
+setDT(LifeCycleSavings) 
+class(LifeCycleSavings) # both a data.table and data.frame
+
+'if you dont want to convert but create a new DT'
+LifeCycleSavings$rownames <- row.names(LifeCycleSavings) # make sure u create the row names because the datatable doesn't have names on the col or rows 
+lcs <- data.table(LifeCycleSavings)
+lcs
+
+'change order of columns'
+setcolorder(lcs, c(6,1:5)) # change order of col
+head(lcs)
+
+'filtering'
+lcs[lcs$sr>12 & lcs$sr<20, ] # equivalent ways
+lcs[sr>12 & sr<20, ]
+
+'select columns'
+lcs[lcs$sr>12 & lcs$sr<20, list(rownames, sr, pop15) ] # equivalent ways for columns
+lcs[sr>12 & sr<20, .(rownames, sr, pop15)]
+
+'create a new column with special sign operator'
+lcs[, pop15_fac:=cut(pop15, breaks=pretty(pop15))] #":=" operator works by reference and not copying
+lcs[, pop75_fac:=cut(pop75, breaks=pretty(pop75))]
+head(lcs)
+
+# multiple grouping by special apostrofo
+lcs[, `:=` (scale_pop15=scale(pop15), 
+          scale_pop75=scale(pop75))]
+# do the same multiple grouping with pipe
+lcs[, `:=` (scale_pop15=scale(pop15) %>% round(2), 
+          scale_pop75=scale(pop75) %>% round(2))]
+head(lcs)
+
+'grouping'
+lcs[, .(sr=mean(sr)), by=pop15_fac] # super fast and easy.
+
+'col names in a character vector'
+mycol <- c("c1", "c2")
+lcs[, (mycol) := .(sr/mean(sr), pop15/mean(pop15))]
+
+'delete columns'
+lcs[, c2 := NULL]
+
+'general sintaz'
+# DT[i , j , by] --> i is where, j is select, by is group by --> SQL language
+# SQL = select AVG(mpg) as Mileage, AVG(wt) as Weight WHERE disp >100 GROUP BY gear from db.mtcars_tbl
+# DATA.TABLE = mtcars_dt[disp>100, .(Mileage=mean(mpg), Weight=mean(wt)), by=.(gear)]
+
+'setting keys to sort the dataset by that column. key is a column of interest'
+setkey(lcs, pop15_fac)
+lcs['(40,45]']
+
+setkey(lcs, rownames, pop15_fac)
+lcs[.(2, '(40,45]')]
+lcs[.(c(2,3), '(40,45]')] # 2 and 3 are the number of the rows to call...since they dont have names.
+
+'dcast.data.table'
+dcast.data.table(lcs, pop15_fac~pop75_fac,
+                 value.var = "sr",
+                 fun.aggregate = mean)
+dcast.data.table(lcs, pop15_fac~pop75_fac,
+                 value.var = c("sr", "dpi"),
+                 fun.aggregate = mean)
+```
+
+--- Writing C++ in R with RCpp ---
+Cool but not really useful. It complicates a lot, the trade off is not worth it. Learn the previous packages like DPlyR or Data.table
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
